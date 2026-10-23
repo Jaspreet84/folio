@@ -2,10 +2,12 @@
 
 Read Markdown in the terminal. folio lays out headings, lists, tables and
 code blocks for the width of your terminal, and gives you the tools you need
-for long documents: a contents pane, jumping between headings, search, and a
-status bar that shows where you are.
+for long documents and folders of them: a contents pane, jumping between
+headings, search, links you can follow and come back from, marks, and a
+memory of where you stopped reading.
 
-Phase 1 of [PLAN.md](PLAN.md). Targets macOS and Linux terminals.
+Phases 1 and 2 of [PLAN.md](PLAN.md) are done. Targets macOS and Linux
+terminals.
 
 ## Build
 
@@ -17,36 +19,56 @@ cargo build --release
 ## Use
 
 ```sh
+folio                       # pick a Markdown file in the current folder
 folio FILE.md               # read a file
-folio docs/                 # read a folder's README
+folio docs/                 # pick a file in a folder
 curl -s URL | folio         # read from stdin
 folio --paging never FILE   # print, like cat
 folio --color never FILE    # plain text, no escape codes
 folio --width 80 FILE       # narrower reading width (default 100)
 folio --theme light FILE    # force the light theme (default: ask the terminal)
+folio --no-watch FILE       # don't reload when the file changes
 ```
 
-Documents that fit on one screen are printed instead of paged.
+Documents that fit on one screen are printed instead of paged. Open files
+reload by themselves when they change on disk.
 
 ## Keys
 
 | Keys | Action |
 |---|---|
-| `j` `k` `↓` `↑` `Enter`, mouse wheel | Scroll one line |
+| `j` `k` `↓` `↑`, mouse wheel | Scroll one line |
 | `space` `f` / `b` | Page down / up |
 | `d` / `u` | Half page down / up |
 | `g` `G` | Top / bottom |
 | `50%` | Go to a percentage |
 | `]]` / `[[` (or `}` / `{`) | Next / previous heading |
-| `t`, `Tab` | Contents pane |
+| `t` | Contents pane |
 | `Ctrl-P` | Jump to a heading by name |
 | `/`, `n` / `N` | Search, next / previous match |
-| `Esc` | Clear search highlights |
-| `r` | Raw Markdown on / off |
+| `Tab` / `Shift-Tab` | Next / previous link or code block |
+| `Enter` | Follow the link, or copy the code block |
+| `y` | Copy the link or code block |
+| `H` / `L` | Back / forward |
+| `m a` / `' a` | Set mark `a` / go to it (`A`-`Z` work across files) |
+| `o` | File picker |
+| `r` / `R` | Raw Markdown / reload |
+| `Esc` | Clear focus and search highlights |
 | `?` | Help |
 | `q` | Quit |
 
 A number before a motion repeats it: `5j`, `3]]`.
+
+Links to other Markdown files open in folio; web links open in your browser.
+Local files that aren't Markdown are never opened, so a document can't make
+you launch a program by accident.
+
+## Where folio keeps things
+
+Reading positions and marks go in `~/.local/state/folio/state.json` on Linux
+and `~/Library/Application Support/folio/state.json` on macOS (or
+`$XDG_STATE_HOME/folio/`, or the file named by `FOLIO_STATE_FILE`). The file
+holds the paths of the last 500 files you read; delete it to forget them.
 
 ## Test
 

@@ -14,6 +14,8 @@ pub enum Depth {
 pub struct Theme {
     pub dark: bool,
     pub depth: Depth,
+    /// The terminal supports OSC 8 hyperlinks, so URLs needn't be shown inline.
+    pub hyperlinks: bool,
     pub heading: [Style; 6],
     pub heading_rule: [Style; 2],
     pub link: Style,
@@ -40,6 +42,10 @@ pub struct Theme {
     pub search_current: Style,
     pub toc_current: Style,
     pub toc_selected: Style,
+    /// The focused link.
+    pub focus: Style,
+    /// The border of a focused code block.
+    pub focus_border: Style,
 }
 
 struct Palette {
@@ -111,6 +117,7 @@ impl Theme {
         Theme {
             dark,
             depth,
+            hyperlinks: false,
             heading,
             heading_rule: [fg(p.h[0]), fg(p.border)],
             link: fg(p.link).add_modifier(Modifier::UNDERLINED),
@@ -157,6 +164,12 @@ impl Theme {
             } else {
                 Style::new().bg(color(p.selected_bg, depth))
             },
+            focus: if colorless {
+                Style::new().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::new().bg(color(p.selected_bg, depth)).add_modifier(bold)
+            },
+            focus_border: if colorless { Style::new().add_modifier(bold) } else { fg(p.current_bg).add_modifier(bold) },
         }
     }
 
@@ -228,6 +241,16 @@ pub fn detect_depth() -> Depth {
         return Depth::TrueColor;
     }
     Depth::Ansi256
+}
+
+/// Whether the terminal is likely to support OSC 8 hyperlinks. Terminals
+/// that don't simply show the text, so this only decides whether URLs are
+/// also printed inline.
+pub fn detect_hyperlinks() -> bool {
+    let env = |k: &str| std::env::var(k).unwrap_or_default();
+    let term = env("TERM");
+    let gnu_screen = term.starts_with("screen") && std::env::var_os("TMUX").is_none();
+    !(env("TERM_PROGRAM") == "Apple_Terminal" || term == "linux" || term == "dumb" || gnu_screen)
 }
 
 /// Ask the terminal whether its background is dark. Falls back to

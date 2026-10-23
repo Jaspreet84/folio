@@ -86,18 +86,20 @@ reserves a placeholder of the right size and swaps it in when ready.
   Rows get separators when any row wraps to more than one line.
 - **Quotes and alerts:** colored left bar; GitHub alerts (`> [!NOTE]`) get a
   text label so meaning doesn't depend on color alone.
-- **Links:** underlined; the URL is shown dimmed after the text (until Phase 2
-  adds OSC 8 links and link focus).
+- **Links:** underlined, and clickable through OSC 8 in terminals that
+  support it. Where OSC 8 isn't available (Terminal.app, the Linux console,
+  GNU screen, plain-text output), the URL is shown dimmed after the text.
+  Footnote references are links to their footnotes.
 - **Images:** a placeholder with the alt text (real images in Phase 3).
 - **Footnotes, front matter, description lists, math, HTML:** footnotes are
   listed at the end with `[n]` markers; front matter is a dim metadata block;
   math is shown as source; HTML tags are stripped and their text is kept.
 
-## Keys (Phase 1)
+## Keys
 
 | Keys | Action |
 |---|---|
-| `j`/`k`, `↓`/`↑`, `Enter`, mouse wheel | Scroll one line |
+| `j`/`k`, `↓`/`↑`, mouse wheel | Scroll one line |
 | `space`/`f`/`PgDn`, `b`/`PgUp` | Page down / up |
 | `d` / `u` | Half page down / up |
 | `g`/`Home`, `G`/`End` | Top / bottom |
@@ -106,11 +108,63 @@ reserves a placeholder of the right size and swaps it in when ready.
 | `t` | Contents pane (open, focus, close) |
 | `Ctrl-P` | Contents pane with a filter for jumping to a heading |
 | `/`, `n`/`N` | Search (smart case, live highlights, "3/17" count) |
-| `r` | Toggle raw Markdown |
+| `Tab` / `Shift-Tab` | Focus the next / previous link or code block |
+| `Enter` | Follow the focused link, or copy the focused code block; with nothing focused, scroll one line |
+| `y` | Copy the focused link or code block |
+| `H`, `Backspace`, `Ctrl-O` / `L` | Back / forward |
+| `m` + letter | Set a mark (`a`-`z` in this file, `A`-`Z` across files) |
+| `'` + letter | Go to a mark; `''` goes back |
+| `o` | File picker |
+| `r` / `R` | Raw Markdown / reload |
+| `Esc` | Clear focus and search highlights |
 | `?` | Help |
 | `q`, `Ctrl-C` | Quit |
 
 A number before a motion repeats it (`5j`, `3]]`).
+
+### Following links
+
+- `#anchor` jumps to a heading (or footnote) in the same document.
+- A relative or absolute path to a Markdown file opens it in folio, at the
+  heading after `#` if there is one. A path starting with `/` that doesn't
+  exist on disk is tried against the repository root, as GitHub does.
+- A folder opens the file picker for that folder.
+- `http`, `https` and `mailto` links open with `open` (macOS) or `xdg-open`
+  (Linux).
+- Anything else is refused with a message, including local files that
+  aren't Markdown. This stops a document from tricking the reader into
+  launching a program. `y` still copies the link.
+
+### History, marks and remembered positions
+
+- Following a link, jumping from the contents pane, a search that moves the
+  view, and opening a file from the picker all add to the back list. `H`
+  goes back, `L` goes forward. The picker is part of the history.
+- Each file's position is remembered when you leave it or quit, and restored
+  the next time you open it, with a "Back where you left off" message.
+- Positions are stored as (source line, offset) pairs, so they survive a
+  different terminal width.
+- Positions and marks are saved in `$XDG_STATE_HOME/folio/state.json`,
+  otherwise `~/.local/state/folio/state.json` on Linux and
+  `~/Library/Application Support/folio/state.json` on macOS.
+  `FOLIO_STATE_FILE` overrides the location.
+- The file keeps the 500 most recently read files. Saves merge with the file
+  on disk, so two folio windows don't erase each other's positions.
+
+### Watching
+
+While a file is open, folio checks its modified time and size every half
+second, and reloads it when either changes, keeping the reader's place.
+Checking the time instead of using file-system events works on network
+drives and on WSL's `/mnt/c`, where events from Windows editors don't
+arrive. `--no-watch` turns it off.
+
+### Copying
+
+`Enter` or `y` on a code block copies it. On a local machine folio uses
+`pbcopy`, `wl-copy`, `xclip` or `xsel`, whichever exists. Over SSH, or when
+none exists, it sends OSC 52, which asks the terminal to set the clipboard.
+In tmux, that needs `set -g set-clipboard on`.
 
 The mouse is not captured, so text selection works normally. Wheel scrolling
 works through the terminal's "alternate scroll" mode, which turns wheel events
@@ -119,13 +173,22 @@ into arrow keys.
 ## Command line
 
 ```
-folio [FILE]                # read a file (a directory opens its README)
+folio                       # pick a Markdown file in the current folder
+folio FILE                  # read a file
+folio FOLDER                # pick a file in that folder
 cat FILE | folio            # read from stdin
 folio --paging never FILE   # print rendered output, like cat
 folio --color never FILE    # no colors
 folio --width 80 FILE       # set the reading width
 folio --theme light FILE    # force a theme (default: ask the terminal)
+folio --no-watch FILE       # don't reload when the file changes
 ```
+
+The file picker lists Markdown files under the folder (up to 12 levels and
+5,000 files), skipping hidden files and anything `.gitignore` excludes. Each
+folder's README comes first, and each file's first heading is shown beside
+its name. `/` filters by name or title. When output isn't a terminal, a
+folder prints its README instead.
 
 When output is not a terminal, folio prints the rendered document once.
 When the document fits on one screen, it is printed instead of paged (like
@@ -139,17 +202,19 @@ xterm colors. `NO_COLOR` is respected.
 1. **Core reader** (this phase): parsing, layout, pager, code highlighting,
    tables that fit and wrap, search, contents pane, resize handling, raw view,
    pipe mode, snapshot tests.
-2. **Navigation:** OSC 8 links, a focus model (`Tab` moves between links,
-   code blocks, tables and diagrams; `Enter` activates), back/forward history,
-   opening a folder with a file picker, marks, remembered positions per file,
-   watch mode, copying code blocks (OSC 52), TOML config with key remapping.
+2. **Navigation** (done): OSC 8 links, a focus model (`Tab` moves between
+   links and code blocks; `Enter` activates), back/forward history, a file
+   picker for folders, marks, remembered positions per file, watch mode,
+   copying code blocks.
 3. **Rich content:** images (Kitty, iTerm2, Sixel, half-block fallback),
    Mermaid (native text renderer for flowcharts and sequence diagrams; `mmdc`
    when installed), Graphviz, math as Unicode, a full-screen table viewer with
-   frozen header and first column, folding sections and `<details>`.
-4. **Polish:** speed on very large files (lazy layout per block), packaging
-   with `cargo-dist` (GitHub releases, Homebrew tap, static musl builds),
-   man page and docs.
+   frozen header and first column, folding sections and `<details>`. Tables
+   and diagrams join the focus model (`Enter` opens them full screen).
+4. **Polish:** speed on very large files (lazy layout per block), a TOML
+   config file with key remapping (moved here from Phase 2), packaging with
+   `cargo-dist` (GitHub releases, Homebrew tap, static musl builds), man page
+   and docs.
 
 ## Phase 1 status (2026-10-23)
 
@@ -176,9 +241,35 @@ Known gaps, to pick up in later phases:
 
 - Loading the full syntax set costs ~150 ms. Phase 4: load a smaller set
   first, or highlight in the background (Phase 3 adds background jobs).
-- Links show their URL in dim text; OSC 8 links come in Phase 2.
 - `<details>` content is always shown; folding comes in Phase 3.
 - Light-theme detection and the colors were not checked on a real Mac.
+
+## Phase 2 status (2026-10-23)
+
+Done and tested on Linux (WSL Ubuntu, tmux 3.4) and Windows:
+
+- OSC 8 links in the pager and in printed output. ratatui's cells can't
+  hold escape sequences, so after each frame folio re-prints the visible
+  link text wrapped in OSC 8, with the same characters and styles.
+- Focus with `Tab`/`Shift-Tab` over links (including footnote references)
+  and code blocks, shown in the footer with what `Enter` and `y` will do.
+- Following links as described above, back/forward history, the file
+  picker, marks `a`-`z` and `A`-`Z`, remembered positions, watching, and
+  copying.
+- 42 tests. New ones cover link classification (and refusals), OSC 8 and
+  OSC 52 output, the state file merging with another writer, picker
+  listing and titles, link and code-block targets, footnote anchors, and
+  hiding inline URLs when hyperlinks are on.
+- Two tmux scripts drove every new key on Linux. A capture of the raw
+  terminal output (`script`) confirmed the OSC 8 sequences.
+
+Known gaps:
+
+- Focus is cleared when the layout changes (resize, raw view, reload).
+- Tables and diagrams aren't focus targets yet (Phase 3).
+- OSC 52 support varies: Terminal.app doesn't support it, and tmux needs
+  `set-clipboard on`. On a local Mac, `pbcopy` is used instead.
+- Not checked on a real Mac.
 
 ## Testing
 

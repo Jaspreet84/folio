@@ -121,6 +121,60 @@ fn search_finds_text_in_tables_code_and_inline_code() {
 }
 
 #[test]
+fn links_and_code_blocks_become_focus_targets() {
+    use folio::layout::TargetKind;
+    let mut hl = Highlighter::new();
+    let source = "See [the install guide](docs/install.md) and [the site](https://example.com).\n\n```sh\necho hi\n```\n\nA note.[^1]\n\n[^1]: Footnote text.\n";
+    let r = render(source, 30, Depth::TrueColor, &mut hl);
+    let kinds: Vec<String> = r
+        .targets
+        .iter()
+        .map(|t| match &t.kind {
+            TargetKind::Link(id) => r.links[*id as usize].clone(),
+            TargetKind::Code { lang, .. } => format!("code:{lang}"),
+        })
+        .collect();
+    assert_eq!(kinds, vec!["docs/install.md", "https://example.com", "code:sh", "#footnote-1"]);
+
+    // The first link wraps: its spans cover exactly its text on each line.
+    let first = &r.targets[0];
+    let covered: String = first
+        .spans
+        .iter()
+        .map(|&(line, col, w)| segs_text(&r.lines[line].segs).chars().skip(col).take(w).collect::<String>())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(covered, "the install guide");
+
+    // The footnote reference leads to the footnote.
+    let line = r.find_anchor("footnote-1").expect("footnote anchor");
+    assert!(segs_text(&r.lines[line].segs).starts_with("[1] Footnote text"));
+}
+
+#[test]
+fn urls_are_hidden_when_the_terminal_shows_hyperlinks() {
+    let mut hl = Highlighter::new();
+    let doc = doc::parse("Read [the docs](https://example.com/docs).");
+    let mut theme = Theme::new(true, Depth::TrueColor);
+    let plain = layout::to_plain(&layout::layout(&doc, 80, &theme, &mut hl));
+    assert_eq!(plain.trim(), "Read the docs (https://example.com/docs).");
+    theme.hyperlinks = true;
+    let linked = layout::to_plain(&layout::layout(&doc, 80, &theme, &mut hl));
+    assert_eq!(linked.trim(), "Read the docs.");
+}
+
+#[test]
+fn outline_matches_the_layout_headings() {
+    let mut hl = Highlighter::new();
+    let source = fixture("basics");
+    let r = render(&source, 80, Depth::None, &mut hl);
+    let outline = layout::outline(&doc::parse(&source));
+    let a: Vec<(&str, usize)> = outline.iter().map(|h| (h.text.as_str(), h.src)).collect();
+    let b: Vec<(&str, usize)> = r.headings.iter().map(|h| (h.text.as_str(), h.src)).collect();
+    assert_eq!(a, b);
+}
+
+#[test]
 fn position_survives_a_relayout() {
     let mut hl = Highlighter::new();
     let source = fixture("basics");

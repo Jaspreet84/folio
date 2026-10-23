@@ -4,20 +4,32 @@ use ratatui::style::Style;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-/// A run of text in one style.
+/// A run of text in one style, optionally part of a link (an index into
+/// the layout's link list).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Seg {
     pub text: String,
     pub style: Style,
+    pub link: Option<u32>,
 }
 
 impl Seg {
     pub fn new(text: impl Into<String>, style: Style) -> Seg {
-        Seg { text: text.into(), style }
+        Seg { text: text.into(), style, link: None }
     }
 
     pub fn plain(text: impl Into<String>) -> Seg {
-        Seg { text: text.into(), style: Style::new() }
+        Seg::new(text, Style::new())
+    }
+
+    pub fn with_link(mut self, link: Option<u32>) -> Seg {
+        self.link = link;
+        self
+    }
+
+    /// Whether text in `style` and `link` can be appended to this run.
+    fn joins(&self, style: Style, link: Option<u32>) -> bool {
+        self.style == style && self.link == link
     }
 }
 
@@ -51,8 +63,9 @@ pub struct Wrapped {
 struct Word {
     pieces: Vec<Seg>,
     width: usize,
-    /// Whether whitespace came before this word, and the style of that space.
-    space: Option<Style>,
+    /// Whether whitespace came before this word, and the style and link of
+    /// that space (a space inside a link belongs to the link).
+    space: Option<(Style, Option<u32>)>,
 }
 
 enum Item {
@@ -63,7 +76,7 @@ enum Item {
 fn split_words(toks: &[Tok]) -> Vec<Item> {
     let mut items = Vec::new();
     let mut cur: Option<Word> = None;
-    let mut pending_space: Option<Style> = None;
+    let mut pending_space: Option<(Style, Option<u32>)> = None;
     for tok in toks {
         match tok {
             Tok::Break => {
@@ -78,18 +91,18 @@ fn split_words(toks: &[Tok]) -> Vec<Item> {
                 for (i, c) in seg.text.char_indices() {
                     if c == ' ' || c == '\n' || c == '\t' {
                         if let Some(s) = start.take() {
-                            push_piece(&mut cur, &seg.text[s..i], seg.style, &mut pending_space);
+                            push_piece(&mut cur, &seg.text[s..i], seg, &mut pending_space);
                         }
                         if let Some(w) = cur.take() {
                             items.push(Item::Word(w));
                         }
-                        pending_space = Some(seg.style);
+                        pending_space = Some((seg.style, seg.link));
                     } else if start.is_none() {
                         start = Some(i);
                     }
                 }
                 if let Some(s) = start {
-                    push_piece(&mut cur, &seg.text[s..], seg.style, &mut pending_space);
+                    push_piece(&mut cur, &seg.text[s..], seg, &mut pending_space);
                 }
             }
         }
@@ -100,13 +113,17 @@ fn split_words(toks: &[Tok]) -> Vec<Item> {
     items
 }
 
-fn push_piece(cur: &mut Option<Word>, text: &str, style: Style, space: &mut Option<Style>) {
+fn push_piece(cur: &mut Option<Word>, text: &str, from: &Seg, space: &mut Option<(Style, Option<u32>)>) {
     let word = cur.get_or_insert_with(|| Word { pieces: Vec::new(), width: 0, space: space.take() });
     word.width += width(text);
     match word.pieces.last_mut() {
-        Some(last) if last.style == style => last.text.push_str(text),
-        _ => word.pieces.push(Seg::new(text, style)),
+        Some(last) if last.joins(from.style, from.link) => last.text.push_str(text),
+        _ => word.pieces.push(Seg::new(text, from.style).with_link(from.link)),
     }
+}
+
+fn space_seg((style, link): (Style, Option<u32>)) -> Seg {
+    Seg::new(" ", style).with_link(link)
 }
 
 struct Line {
@@ -123,7 +140,7 @@ impl Line {
     fn push(&mut self, seg: Seg) {
         self.width += width(&seg.text);
         match self.segs.last_mut() {
-            Some(last) if last.style == seg.style => last.text.push_str(&seg.text),
+            Some(last) if last.joins(seg.style, seg.link) => last.text.push_str(&seg.text),
             _ => self.segs.push(seg),
         }
     }
@@ -150,7 +167,7 @@ pub fn wrap(toks: &[Tok], width: usize) -> Vec<Wrapped> {
         let gap = usize::from(line.width > 0 && word.space.is_some());
         if line.width + gap + word.width <= width {
             if gap == 1 {
-                line.push(Seg::new(" ", word.space.unwrap_or_default()));
+                line.push(space_seg(word.space.unwrap_or_default()));
             }
             line.words += 1;
             for p in word.pieces {
@@ -167,7 +184,7 @@ pub fn wrap(toks: &[Tok], width: usize) -> Vec<Wrapped> {
             if line.width > 0 && line.width + gap + 4 > width {
                 lines.push(std::mem::replace(&mut line, Line::new()).finish());
             } else if gap == 1 {
-                line.push(Seg::new(" ", word.space.unwrap_or_default()));
+                line.push(space_seg(word.space.unwrap_or_default()));
             }
             line.words += 1;
             for p in word.pieces {
@@ -176,7 +193,7 @@ pub fn wrap(toks: &[Tok], width: usize) -> Vec<Wrapped> {
                     if line.width + gw > width && line.width > 0 {
                         lines.push(std::mem::replace(&mut line, Line::new()).finish());
                     }
-                    line.push(Seg::new(g, p.style));
+                    line.push(Seg::new(g, p.style).with_link(p.link));
                 }
             }
         }
@@ -191,9 +208,9 @@ pub fn wrap(toks: &[Tok], width: usize) -> Vec<Wrapped> {
 /// half of the line; otherwise breaks anywhere. Always returns at least one
 /// chunk.
 pub fn wrap_code(segs: &[Seg], first_width: usize, rest_width: usize) -> Vec<Vec<Seg>> {
-    let cells: Vec<(&str, Style, usize)> = segs
+    let cells: Vec<(&str, Style, usize, Option<u32>)> = segs
         .iter()
-        .flat_map(|s| s.text.graphemes(true).map(move |g| (g, s.style, width(g))))
+        .flat_map(|s| s.text.graphemes(true).map(move |g| (g, s.style, width(g), s.link)))
         .collect();
     let mut out = Vec::new();
     let mut start = 0;
@@ -209,16 +226,15 @@ pub fn wrap_code(segs: &[Seg], first_width: usize, rest_width: usize) -> Vec<Vec
             }
             end += 1;
         }
-        if end < cells.len() {
-            if let Some(s) = after_space.filter(|&s| (s - start) * 2 >= limit) {
+        if end < cells.len()
+            && let Some(s) = after_space.filter(|&s| (s - start) * 2 >= limit) {
                 end = s;
             }
-        }
         let mut line: Vec<Seg> = Vec::new();
-        for &(g, style, _) in &cells[start..end] {
+        for &(g, style, _, link) in &cells[start..end] {
             match line.last_mut() {
-                Some(last) if last.style == style => last.text.push_str(g),
-                _ => line.push(Seg::new(g, style)),
+                Some(last) if last.joins(style, link) => last.text.push_str(g),
+                _ => line.push(Seg::new(g, style).with_link(link)),
             }
         }
         out.push(line);

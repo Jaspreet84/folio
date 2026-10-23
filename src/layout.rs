@@ -52,12 +52,43 @@ pub struct HeadingRef {
     pub src: usize,
 }
 
+/// Something the reader can move focus to with Tab and act on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TargetKind {
+    /// A link; the number indexes [`Rendered::links`].
+    Link(u32),
+    Code { lang: String, code: String },
+}
+
+/// A focus target and where it is drawn, as (line, column, width) runs.
+#[derive(Clone, Debug)]
+pub struct Target {
+    pub kind: TargetKind,
+    pub spans: Vec<(usize, usize, usize)>,
+}
+
+impl Target {
+    pub fn first_line(&self) -> usize {
+        self.spans.iter().map(|s| s.0).min().unwrap_or(0)
+    }
+
+    pub fn last_line(&self) -> usize {
+        self.spans.iter().map(|s| s.0).max().unwrap_or(0)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Rendered {
     pub width: usize,
     pub lines: Vec<RLine>,
     pub flows: Vec<Flow>,
     pub headings: Vec<HeadingRef>,
+    /// Link URLs, as written in the document. `Seg::link` indexes this.
+    pub links: Vec<String>,
+    /// Focus targets in reading order.
+    pub targets: Vec<Target>,
+    /// Named places other than headings (footnotes), as (name, line).
+    pub anchors: Vec<(String, usize)>,
 }
 
 impl Rendered {
@@ -96,6 +127,41 @@ impl Rendered {
             h.line += base;
             self.headings.push(h);
         }
+        for mut t in child.targets {
+            for s in &mut t.spans {
+                s.0 += base;
+                s.1 += shift;
+            }
+            self.targets.push(t);
+        }
+        for (name, line) in child.anchors {
+            self.anchors.push((name, line + base));
+        }
+    }
+
+    /// Record a target for every link, from where its text ended up.
+    fn collect_links(&mut self) {
+        let mut spans: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); self.links.len()];
+        for (i, line) in self.lines.iter().enumerate() {
+            let mut col = 0;
+            for seg in &line.segs {
+                let w = width(&seg.text);
+                if let Some(id) = seg.link {
+                    let list = &mut spans[id as usize];
+                    match list.last_mut() {
+                        Some(last) if last.0 == i && last.1 + last.2 == col => last.2 += w,
+                        _ => list.push((i, col, w)),
+                    }
+                }
+                col += w;
+            }
+        }
+        for (id, spans) in spans.into_iter().enumerate() {
+            if !spans.is_empty() {
+                self.targets.push(Target { kind: TargetKind::Link(id as u32), spans });
+            }
+        }
+        self.targets.sort_by_key(|t| (t.first_line(), t.spans[0].1));
     }
 
     /// Where the line `top` sits in the source: the source line, and how
@@ -122,14 +188,50 @@ impl Rendered {
         let run = self.lines[start..].iter().take_while(|l| l.src == self.lines[start].src).count();
         start + offset.min(run.saturating_sub(1))
     }
+
+    /// The line of the heading or footnote called `name` (ignoring case).
+    pub fn find_anchor(&self, name: &str) -> Option<usize> {
+        let name = name.to_lowercase();
+        let heading = self.headings.iter().find(|h| h.anchor.to_lowercase() == name).map(|h| h.line);
+        heading.or_else(|| self.anchors.iter().find(|(a, _)| *a == name).map(|(_, line)| *line))
+    }
 }
 
 /// Lay out a document at `width` columns.
 pub fn layout(doc: &Document, width: usize, theme: &Theme, hl: &mut Highlighter) -> Rendered {
     let width = width.max(1);
-    let mut l = Layouter { theme, hl, list_depth: 0 };
+    let mut l = Layouter { theme, hl, list_depth: 0, links: Vec::new() };
     let mut out = l.blocks(&doc.blocks, width, false);
     out.width = width;
+    out.links = l.links;
+    out.collect_links();
+    out
+}
+
+/// The document's headings in order, without laying anything out. The
+/// `line` fields are 0; [`layout_raw`] fills them in for the raw view.
+pub fn outline(doc: &Document) -> Vec<HeadingRef> {
+    fn walk(blocks: &[Block], out: &mut Vec<HeadingRef>) {
+        for b in blocks {
+            match &b.kind {
+                BlockKind::Heading { level, inlines, anchor } => out.push(HeadingRef {
+                    level: *level,
+                    text: plain_text(inlines).trim().to_string(),
+                    anchor: anchor.clone(),
+                    line: 0,
+                    src: b.line,
+                }),
+                BlockKind::Quote(inner) | BlockKind::Alert { blocks: inner, .. } | BlockKind::Footnote { blocks: inner, .. } => {
+                    walk(inner, out)
+                }
+                BlockKind::List { items, .. } => items.iter().for_each(|i| walk(&i.blocks, out)),
+                BlockKind::Definitions(defs) => defs.iter().flat_map(|d| &d.details).for_each(|d| walk(d, out)),
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&doc.blocks, &mut out);
     out
 }
 
@@ -185,6 +287,7 @@ struct Layouter<'t, 'h> {
     theme: &'t Theme,
     hl: &'h mut Highlighter,
     list_depth: usize,
+    links: Vec<String>,
 }
 
 impl Layouter<'_, '_> {
@@ -270,7 +373,9 @@ impl Layouter<'_, '_> {
                 let marker = format!("[{number}] ");
                 let first = [Seg::new(marker.clone(), t.footnote)];
                 let rest = [Seg::plain(" ".repeat(width_of(&marker)))];
-                self.nested(blocks, width, true, (&first, &rest), src)
+                let mut out = self.nested(blocks, width, true, (&first, &rest), src);
+                out.anchors.push((footnote_anchor(*number), 0));
+                out
             }
             BlockKind::Definitions(defs) => self.definitions(defs, width, src),
             BlockKind::Math(tex) => {
@@ -391,6 +496,14 @@ impl Layouter<'_, '_> {
             out.flows.push(flow);
         }
         out.push(vec![Seg::new(format!("╰{}╯", "─".repeat(width - 2)), border)], src, 0);
+        // Focus outlines the box: top and bottom borders plus the side bars.
+        let last = out.lines.len() - 1;
+        let mut spans = vec![(0, 0, width), (last, 0, width)];
+        for line in 1..last {
+            spans.push((line, 0, 1));
+            spans.push((line, width - 1, 1));
+        }
+        out.targets.push(Target { kind: TargetKind::Code { lang: lang.to_string(), code: code.to_string() }, spans });
         out
     }
 
@@ -451,22 +564,19 @@ impl Layouter<'_, '_> {
             return Rendered::default();
         }
         // Each cell as wrap input; the header row is bold.
-        let cells: Vec<Vec<Vec<Tok>>> = rows
-            .iter()
-            .enumerate()
-            .map(|(r, row)| {
-                (0..ncols)
-                    .map(|c| {
-                        let mut toks = Vec::new();
-                        if let Some(cell) = row.get(c) {
-                            let style = if r == 0 { t.table_header } else { Style::new() };
-                            self.inlines(cell, style, &mut toks);
-                        }
-                        toks
-                    })
-                    .collect()
-            })
-            .collect();
+        let mut cells: Vec<Vec<Vec<Tok>>> = Vec::with_capacity(rows.len());
+        for (r, row) in rows.iter().enumerate() {
+            let style = if r == 0 { t.table_header } else { Style::new() };
+            let mut out_row = Vec::with_capacity(ncols);
+            for c in 0..ncols {
+                let mut toks = Vec::new();
+                if let Some(cell) = row.get(c) {
+                    self.inlines(cell, style, &mut toks);
+                }
+                out_row.push(toks);
+            }
+            cells.push(out_row);
+        }
 
         let mut min = vec![1usize; ncols];
         let mut max = vec![1usize; ncols];
@@ -601,45 +711,64 @@ impl Layouter<'_, '_> {
     }
 
     /// Flatten inlines into wrap input, applying `style` and the theme.
-    fn inlines(&self, inlines: &[Inline], style: Style, out: &mut Vec<Tok>) {
+    fn inlines(&mut self, inlines: &[Inline], style: Style, out: &mut Vec<Tok>) {
+        self.inlines_in(inlines, style, None, out);
+    }
+
+    /// Like [`Self::inlines`], with every segment marked as part of `link`.
+    fn inlines_in(&mut self, inlines: &[Inline], style: Style, link: Option<u32>, out: &mut Vec<Tok>) {
         let t = self.theme;
+        let seg = |text: String, style: Style| Tok::Text(Seg::new(text, style).with_link(link));
         for inline in inlines {
             match inline {
-                Inline::Text(s) => out.push(Tok::Text(Seg::new(s.clone(), style))),
+                Inline::Text(s) => out.push(seg(s.clone(), style)),
                 Inline::Code(s) => {
                     if t.has_color() {
                         // Non-breaking spaces pad the background without
                         // giving the wrapper a place to break.
-                        out.push(Tok::Text(Seg::new(format!("\u{a0}{s}\u{a0}"), style.patch(t.code_inline))));
+                        out.push(seg(format!("\u{a0}{s}\u{a0}"), style.patch(t.code_inline)));
                     } else {
-                        out.push(Tok::Text(Seg::new(format!("`{s}`"), style)));
+                        out.push(seg(format!("`{s}`"), style));
                     }
                 }
-                Inline::Emph(c) => self.inlines(c, style.add_modifier(Modifier::ITALIC), out),
-                Inline::Strong(c) => self.inlines(c, style.add_modifier(Modifier::BOLD), out),
-                Inline::Strike(c) => self.inlines(c, style.add_modifier(Modifier::CROSSED_OUT), out),
+                Inline::Emph(c) => self.inlines_in(c, style.add_modifier(Modifier::ITALIC), link, out),
+                Inline::Strong(c) => self.inlines_in(c, style.add_modifier(Modifier::BOLD), link, out),
+                Inline::Strike(c) => self.inlines_in(c, style.add_modifier(Modifier::CROSSED_OUT), link, out),
                 Inline::Link { url, children } => {
+                    let id = Some(self.links.len() as u32);
+                    self.links.push(url.clone());
+                    let link_style = style.patch(t.link);
                     if children.is_empty() {
-                        out.push(Tok::Text(Seg::new(url.clone(), style.patch(t.link))));
+                        out.push(Tok::Text(Seg::new(url.clone(), link_style).with_link(id)));
                         continue;
                     }
-                    self.inlines(children, style.patch(t.link), out);
-                    if show_url(url, children) {
-                        out.push(Tok::Text(Seg::new(format!(" ({url})"), style.patch(t.url))));
+                    self.inlines_in(children, link_style, id, out);
+                    if !t.hyperlinks && show_url(url, children) {
+                        out.push(seg(format!(" ({url})"), style.patch(t.url)));
                     }
                 }
                 Inline::Image { alt, .. } => {
                     let alt = if alt.trim().is_empty() { "image" } else { alt.trim() };
                     let text = if t.has_color() { format!("▣ {alt}") } else { format!("[image: {alt}]") };
-                    out.push(Tok::Text(Seg::new(text, style.patch(t.image))));
+                    out.push(seg(text, style.patch(t.image)));
                 }
-                Inline::SoftBreak => out.push(Tok::Text(Seg::new(" ", style))),
+                Inline::SoftBreak => out.push(seg(" ".into(), style)),
                 Inline::HardBreak => out.push(Tok::Break),
-                Inline::FootnoteRef(n) => out.push(Tok::Text(Seg::new(format!("[{n}]"), style.patch(t.footnote)))),
-                Inline::Math(s) => out.push(Tok::Text(Seg::new(s.clone(), style.patch(t.math)))),
+                Inline::FootnoteRef(n) => {
+                    // A link to the footnote, so Tab and Enter can jump there.
+                    let id = Some(self.links.len() as u32);
+                    self.links.push(format!("#{}", footnote_anchor(*n)));
+                    out.push(Tok::Text(Seg::new(format!("[{n}]"), style.patch(t.footnote)).with_link(id)));
+                }
+                Inline::Math(s) => out.push(seg(s.clone(), style.patch(t.math))),
             }
         }
     }
+}
+
+/// The anchor name of footnote `n`; footnote references link to it.
+pub fn footnote_anchor(n: usize) -> String {
+    format!("footnote-{n}")
 }
 
 /// Wrap prose into lines and record it as one flow.
