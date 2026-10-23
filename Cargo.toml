@@ -2,6 +2,12 @@
 name = "folio"
 version = "0.1.0"
 edition = "2024"
+description = "Read Markdown in the terminal: tables, code, contents, search, links and history"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Jaspreet84/folio"
+readme = "README.md"
+keywords = ["markdown", "terminal", "pager", "reader", "tui"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0.104"

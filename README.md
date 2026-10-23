@@ -79,3 +79,16 @@ cargo test
 Layout snapshots live in `tests/snapshots`. After an intended rendering
 change, review and accept them with `cargo insta review` (or rerun with
 `INSTA_UPDATE=always`).
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution you submit for
+inclusion in folio, as defined in the Apache-2.0 license, is dual-licensed
+as above, without any additional terms or conditions.
