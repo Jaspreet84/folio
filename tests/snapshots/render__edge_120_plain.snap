@@ -1,0 +1,52 @@
+---
+source: tests/render.rs
+expression: "layout::to_plain(&plain)"
+---
+Setext heading
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Another one
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• one
+  ◦ two
+    ▪ three
+      ‣ four
+        • five
+          ◦ six
+            ▪ seven
+              ‣ eight deeply nested item text that keeps going
+
+│ │ │ │ │ │ deeply quoted text that must still fit within the width
+
+Averyveryveryveryveryveryveryveryveryveryveryveryveryveryverylongwordwithnospaces in a paragraph.
+
+A line with a control character: �[31m→ here.
+
+Text with Ctrl+C and a
+break.
+
+1. one
+
+2. ten
+
+3. a hundred
+
+4. a hundred and one
+
+☐ unchecked
+☑ checked
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Click to expand
+
+Hidden content.
+
+╭─────╮
+│ a   │
+╞═════╡
+│ `x` │
+╰─────╯
+
+empty link

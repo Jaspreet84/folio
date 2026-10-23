@@ -1,0 +1,74 @@
+---
+source: tests/render.rs
+expression: "layout::to_plain(&plain)"
+---
+╭─ front matter ───────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ title: Basics                                                                                                        │
+│ author: folio                                                                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Getting started
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+folio renders Markdown in the terminal with italic, bold italic, strikethrough and `inline code`. Links look like the
+docs (https://example.com/docs), and bare URLs like https://example.com stay readable. Anchors such as the install
+section don't repeat their target.
+
+Install
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Run the installer, then check the version.[1] Each step is safe to repeat.[2]
+
+1. Download the release.
+2. Unpack it:
+   ◦ on macOS, double-click the archive
+   ◦ on Linux, use `tar -xzf folio.tar.gz`
+     ▪ nested lists get their own bullet
+3. Put `folio` on your `PATH`.
+
+☑ Write the parser
+☐ Add images
+☐ Add diagrams
+
+### Loose lists
+
+• First item with a paragraph.
+
+  A second paragraph in the same item.
+
+• Second item.
+
+│ A quote can hold several lines of text that wrap across the width of the terminal.
+│
+│ │ And quotes can nest.
+
+┃ Note
+┃ Alerts get a colored bar and a label.
+
+┃ Warning
+┃ This one warns about something.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Line one with a hard break
+line two.
+
+[image: A diagram of the pipeline]
+
+[image: build]
+
+[image: folio logo]
+Read Markdown comfortably
+
+Term
+    The definition of the term.
+
+  E = mc^2
+
+Inline math like a^2 + b^2 = c^2 is shown as source.
+
+── Footnotes ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+[1] The version is printed by `folio --version`.
+
+[2] Running it twice changes nothing.

@@ -1,0 +1,46 @@
+# Tables
+
+## Small
+
+| Key | Action |
+|-----|--------|
+| `j` | Down   |
+| `k` | Up     |
+
+## Aligned
+
+| Left | Center | Right |
+|:-----|:------:|------:|
+| a    |   b    |     c |
+| longer text | mid | 1,234.50 |
+
+## Wide, wraps to fit
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--paging` | `auto` | When to page the output. "auto" pages when output is a terminal and the document is longer than one screen. |
+| `--color` | `auto` | When to use colors. "auto" respects the NO_COLOR environment variable and turns colors off when output is not a terminal. |
+| `--width` | `100` | Maximum reading width in columns. See https://example.com/a/very/long/url/that/should/break/inside/the/cell for details. |
+
+## Unicode
+
+| Language | Greeting | Notes |
+|----------|----------|-------|
+| 日本語 | こんにちは | wide characters take two columns |
+| Emoji | 👋 hello | one emoji, two columns |
+| Ελληνικά | Γεια σου | |
+
+## Too many columns
+
+| A | B | C | D | E | F | G | H | I | J | K | L |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| alpha one | beta two | gamma three | delta four | epsilon five | zeta six | eta seven | theta eight | iota nine | kappa ten | lambda eleven | mu twelve |
+
+## Empty cells and header only
+
+| One | Two |
+|-----|-----|
+|     | x   |
+
+| Only | Header |
+|------|--------|

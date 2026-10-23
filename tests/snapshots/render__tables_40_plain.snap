@@ -1,0 +1,113 @@
+---
+source: tests/render.rs
+expression: "layout::to_plain(&plain)"
+---
+Tables
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Small
+────────────────────────────────────────
+
+╭─────┬────────╮
+│ Key │ Action │
+╞═════╪════════╡
+│ `j` │ Down   │
+│ `k` │ Up     │
+╰─────┴────────╯
+
+Aligned
+────────────────────────────────────────
+
+╭─────────────┬────────┬──────────╮
+│ Left        │ Center │    Right │
+╞═════════════╪════════╪══════════╡
+│ a           │   b    │        c │
+│ longer text │  mid   │ 1,234.50 │
+╰─────────────┴────────┴──────────╯
+
+Wide, wraps to fit
+────────────────────────────────────────
+
+╭────────────┬─────────┬───────────────╮
+│ Option     │ Default │ Description   │
+╞════════════╪═════════╪═══════════════╡
+│ `--paging` │ `auto`  │ When to page  │
+│            │         │ the output.   │
+│            │         │ "auto" pages  │
+│            │         │ when output   │
+│            │         │ is a terminal │
+│            │         │ and the       │
+│            │         │ document is   │
+│            │         │ longer than   │
+│            │         │ one screen.   │
+├────────────┼─────────┼───────────────┤
+│ `--color`  │ `auto`  │ When to use   │
+│            │         │ colors.       │
+│            │         │ "auto"        │
+│            │         │ respects the  │
+│            │         │ NO_COLOR      │
+│            │         │ environment   │
+│            │         │ variable and  │
+│            │         │ turns colors  │
+│            │         │ off when      │
+│            │         │ output is not │
+│            │         │ a terminal.   │
+├────────────┼─────────┼───────────────┤
+│ `--width`  │ `100`   │ Maximum       │
+│            │         │ reading width │
+│            │         │ in columns.   │
+│            │         │ See https://e │
+│            │         │ xample.com/a/ │
+│            │         │ very/long/url │
+│            │         │ /that/should/ │
+│            │         │ break/inside/ │
+│            │         │ the/cell for  │
+│            │         │ details.      │
+╰────────────┴─────────┴───────────────╯
+
+Unicode
+────────────────────────────────────────
+
+╭──────────┬────────────┬──────────────╮
+│ Language │ Greeting   │ Notes        │
+╞══════════╪════════════╪══════════════╡
+│ 日本語   │ こんにちは │ wide         │
+│          │            │ characters   │
+│          │            │ take two     │
+│          │            │ columns      │
+├──────────┼────────────┼──────────────┤
+│ Emoji    │ 👋 hello   │ one emoji,   │
+│          │            │ two columns  │
+├──────────┼────────────┼──────────────┤
+│ Ελληνικά │ Γεια σου   │              │
+╰──────────┴────────────┴──────────────╯
+
+Too many columns
+────────────────────────────────────────
+
+── 1 ───────────────────────────────────
+A: alpha one
+B: beta two
+C: gamma three
+D: delta four
+E: epsilon five
+F: zeta six
+G: eta seven
+H: theta eight
+I: iota nine
+J: kappa ten
+K: lambda eleven
+L: mu twelve
+
+Empty cells and header only
+────────────────────────────────────────
+
+╭─────┬─────╮
+│ One │ Two │
+╞═════╪═════╡
+│     │ x   │
+╰─────┴─────╯
+
+╭──────┬────────╮
+│ Only │ Header │
+╰──────┴────────╯
