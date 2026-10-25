@@ -1,0 +1,5 @@
+flowchart TD
+    A[Receive order] --> B[In stock?]
+    B --> C[Ship it]
+    B --> D[Back-order]
+    D --> B

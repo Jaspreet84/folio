@@ -1,0 +1,5 @@
+flowchart TD
+    A[Incoming request] --> B{Route by type}
+    B -->|read| C[Cache lookup]
+    B -->|write| D[Primary database]
+    B -->|admin| E[Audit and approve]

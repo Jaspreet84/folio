@@ -1,0 +1,16 @@
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant B as Browser
+    participant A as API
+    participant D as Database
+    U->>B: Click sign in
+    B->>+A: POST /login
+    A->>D: SELECT user
+    D-->>A: row
+    Note right of A: bcrypt compare
+    A-->>-B: 200 + session cookie
+    B-->>U: Show dashboard
+    loop every 5 minutes
+        B->>A: Refresh token
+    end

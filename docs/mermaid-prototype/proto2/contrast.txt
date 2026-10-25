@@ -1,0 +1,12 @@
+light border C4CBD3                truecolor 1.64:1   256-color idx 251 #C6C6C6 1.71:1
+light muted 6E7781                 truecolor 4.55:1   256-color idx 243 #767676 4.54:1
+light 57606A                       truecolor 6.39:1   256-color idx 59 #5F5F5F 6.39:1
+light 8C959F                       truecolor 3.04:1   256-color idx 246 #949494 3.03:1
+dark border 4B5263 on 282C34       truecolor 1.79:1   256-color idx 239 #4E4E4E 1.68:1
+dark border 4B5263 on 1E1E1E       truecolor 2.13:1   256-color idx 239 #4E4E4E 2.00:1
+dark border 4B5263 on black        truecolor 2.69:1   256-color idx 239 #4E4E4E 2.52:1
+dark muted 7F848E on 282C34        truecolor 3.73:1   256-color idx 102 #878787 3.90:1
+dark 9DA5B4 on 282C34              truecolor 5.65:1   256-color idx 145 #AFAFAF 6.38:1
+dark ABB2BF on 282C34              truecolor 6.57:1   256-color idx 249 #B2B2B2 6.60:1
+dark 9DA5B4 on black               truecolor 8.47:1   256-color idx 145 #AFAFAF 9.57:1
+dark 7F848E on black               truecolor 5.59:1   256-color idx 102 #878787 5.85:1

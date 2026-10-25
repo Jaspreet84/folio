@@ -1,0 +1,6 @@
+flowchart TD
+    A[Draft] --> B[Review]
+    B -->|changes| A
+    B --> C[Test]
+    C -->|fail| A
+    C --> D[Ship]

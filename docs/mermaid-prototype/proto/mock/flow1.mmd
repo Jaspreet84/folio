@@ -1,0 +1,7 @@
+flowchart TD
+    A[Receive order] --> B{In stock?}
+    B -->|yes| C[Ship it]
+    B -->|no| D[Back-order]
+    C --> F([Done])
+    D -.-> E[(Orders DB)]
+    D -->|retry| B

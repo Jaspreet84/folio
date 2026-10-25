@@ -1,0 +1,20 @@
+flow1.mmd  natural 39x20 checks [0, 0, 0, 0, 0, 0]  [A] 38:C 37x20 | 40:N 39x20 | 51:N 39x20 | 78:N 39x20 | 100:N 39x20 | 118:N 39x20
+seq1.mmd  natural 46x26 checks [0, 0, 0, 6, 0]  [A] 38:outline | 40:L8 40x21 | 51:N 46x26 | 78:N 46x26 | 100:N 46x26 | 118:N 46x26
+amp.mmd  natural 17x17 checks [0, 0, 1, 0, 0, 0]  [A] 38:N 17x17 | 40:N 17x17 | 51:N 17x17 | 78:N 17x17 | 100:N 17x17 | 118:N 17x17
+b3.mmd  natural 65x14 checks [0, 0, 0, 0, 0, 0]  [A] 38:L8 37x18 | 40:L8 37x18 | 51:L8 37x18 | 78:N 65x14 | 100:N 65x14 | 118:N 65x14
+cjk.mmd  natural 21x14 checks [0, 0, 0, 0, 0, 0]  [A] 38:N 21x14 | 40:N 21x14 | 51:N 21x14 | 78:N 21x14 | 100:N 21x14 | 118:N 21x14
+enderr.mmd source: lowercase "end" used as a node name
+fm.mmd  natural 15x11 checks [0, 0, 0, 0, 0, 0]  [A] 38:N 15x11 | 40:N 15x11 | 51:N 15x11 | 78:N 15x11 | 100:N 15x11 | 118:N 15x11
+half.mmd source: unexpected statement "A-|\B: half arrow"
+loops2.mmd  natural 25x15 checks [0, 0, 0, 0, 0, 0]  [A] 38:N 25x15 | 40:N 25x15 | 51:N 25x15 | 78:N 25x15 | 100:N 25x15 | 118:N 25x15
+lr7.mmd  natural 90x3 checks [0, 0, 0, 0, 0, 0]  [A] 38:T 13x27 | 40:T 13x27 | 51:T 13x27 | 78:C 78x3 | 100:N 90x3 | 118:N 90x3  [B] 38:T 13x27 | 40:T 13x27 | 51:T 13x27 | 78:C 78x3 | 100:N 90x3 | 118:N 90x3  [C] 38:T 13x27 | 40:T 13x27 | 51:T 13x27 | 78:C 78x3 | 100:N 90x3 | 118:N 90x3
+lrloop.mmd  natural 43x5 checks [0, 0, 0, 0, 0, 0]  [A] 38:C 35x5 | 40:C 35x5 | 51:N 43x5 | 78:N 43x5 | 100:N 43x5 | 118:N 43x5  [B] 38:C 35x5 | 40:C 35x5 | 51:N 43x5 | 78:N 43x5 | 100:N 43x5 | 118:N 43x5  [C] 38:C 35x5 | 40:C 35x5 | 51:N 43x5 | 78:N 43x5 | 100:N 43x5 | 118:N 43x5
+pie.mmd source: type pie
+retryrect.mmd  natural 35x13 checks [0, 0, 0, 0, 0, 0]  [A] 38:N 35x13 | 40:N 35x13 | 51:N 35x13 | 78:N 35x13 | 100:N 35x13 | 118:N 35x13
+seq2.mmd  natural 79x32 checks [0, 0, 0, 4, 0]  [A] 38:outline | 40:outline | 51:outline | 78:L16 75x25 | 100:N 79x32 | 118:N 79x32
+seq6.mmd  natural 144x34 checks [0, 0, 0, 3, 0]  [A] 38:outline | 40:outline | 51:outline | 78:L8 76x47 | 100:L8 76x47 | 118:L16 108x33
+ship.mmd  natural 57x23 checks [0, 0, 0, 0, 0, 0]  [A] 38:L16 38x26 | 40:L16 38x26 | 51:L16 38x26 | 78:N 57x23 | 100:N 57x23 | 118:N 57x23
+spaces.mmd  natural 35x11 checks [0, 0, 0, 0, 0]  [A] 38:N 35x11 | 40:N 35x11 | 51:N 35x11 | 78:N 35x11 | 100:N 35x11 | 118:N 35x11
+sub.mmd  natural 27x22 checks [0, 0, 0, 0, 0, 0]  [A] 38:N 27x22 | 40:N 27x22 | 51:N 27x22 | 78:N 27x22 | 100:N 27x22 | 118:N 27x22
+syntax.mmd source: unterminated node shape
+xmas.mmd  natural 35x20 checks [0, 0, 0, 0, 0, 0]  [A] 38:N 35x20 | 40:N 35x20 | 51:N 35x20 | 78:N 35x20 | 100:N 35x20 | 118:N 35x20

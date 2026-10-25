@@ -1,0 +1,13 @@
+sequenceDiagram
+    participant U as User
+    participant W as Web app
+    participant DB as Database
+    U->>W: Log in
+    W->>DB: Find user
+    DB-->>W: User row
+    W->>W: Check hash
+    alt valid
+        W-->>U: Session cookie
+    else invalid
+        W-->>U: 401
+    end

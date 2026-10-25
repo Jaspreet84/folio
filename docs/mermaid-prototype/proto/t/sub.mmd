@@ -1,0 +1,11 @@
+flowchart TD
+    subgraph one [Frontend]
+      a1[Web] --> a2[Mobile]
+    end
+    subgraph two [Backend]
+      b1[API] --> b2[(DB)]
+    end
+    a1 --> b1
+    a2 --> b1
+    b1 --> c[Cache]
+    c --> a1

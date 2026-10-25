@@ -1,0 +1,12 @@
+flowchart TD
+  A[Start] --> B{Is it working?}
+  B -->|Yes| C[Great, ship the release to production]
+  B -->|No| D[Debug the failing integration tests]
+  D --> E[Fix the bug]
+  E --> B
+  C --> F[Write the release notes]
+  F --> G[Announce]
+  style A fill:#f9f
+  classDef big stroke-width:4px
+  class C big
+  click A "https://example.com"

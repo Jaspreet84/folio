@@ -1,0 +1,4 @@
+# The GitHub samples are other people's content; keep them out of the repo.
+sgdata/
+*.jsonl
+__pycache__/

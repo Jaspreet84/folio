@@ -225,6 +225,8 @@ xterm colors. `NO_COLOR` is respected.
    when installed), Graphviz, math as Unicode, a full-screen table viewer with
    frozen header and first column, folding sections and `<details>`. Tables
    and diagrams join the focus model (`Enter` opens them full screen).
+   The Mermaid design, with measurements and the owner's open decisions, is
+   in [docs/mermaid-plan.md](docs/mermaid-plan.md).
 4. **Polish:** speed on very large files (lazy layout per block), a TOML
    config file with key remapping (moved here from Phase 2), packaging with
    `cargo-dist` (GitHub releases, Homebrew tap, static musl builds), man page

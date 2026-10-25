@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant C as Client app
+    participant G as API gateway
+    participant A as Auth service
+    participant O as Order service
+    participant P as Payment provider
+    participant Q as Message queue
+    C->>G: POST /orders with bearer token
+    G->>A: Validate token and scopes
+    A-->>G: Token valid for customer 42
+    G->>O: Create order (customer 42)
+    O->>P: Authorize payment of 19.99 EUR
+    P-->>O: Authorization id pay_8f2
+    O->>Q: Publish OrderCreated event
+    O-->>G: 201 Created with order id
+    G-->>C: 201 Created

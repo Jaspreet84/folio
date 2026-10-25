@@ -1,0 +1,43 @@
+sample of 1500 flowcharts, fix mode, ladder A, single process:
+  total p50 17.0 ms p90 42.9 p95 54.2 p99 131.6 max 789 ms
+  widest p50 3 p90 6 p99 12 max 35
+  elems p50 11 p90 28 p99 77 max 392
+  dummies p50 3 p90 15 p99 56 max 359
+slowest 30 (from the parallel run), re-timed:
+  total  10336 ms (prep    72, draw  10259)  nodes  66 edges 250 dummies 2732 widest rank 101 elements 2798
+  total   5268 ms (prep    76, draw   5187)  nodes  49 edges 207 dummies 2705 widest rank  95 elements 2754
+  total   2458 ms (prep     1, draw   2453)  nodes  83 edges  82 dummies   0 widest rank  82 elements   83
+  total   2101 ms (prep     1, draw   2097)  nodes  79 edges  78 dummies   0 widest rank  78 elements   79
+  total   1144 ms (prep     5, draw   1136)  nodes  80 edges 128 dummies  38 widest rank  63 elements  118
+  total   1102 ms (prep     4, draw   1097)  nodes  19 edges  72 dummies 146 widest rank  29 elements  165
+  total   1220 ms (prep     4, draw   1213)  nodes  25 edges  67 dummies 170 widest rank  20 elements  195
+  total    871 ms (prep     4, draw    866)  nodes  21 edges  73 dummies 149 widest rank  36 elements  170
+  total    778 ms (prep     5, draw    773)  nodes  35 edges  82 dummies 137 widest rank  29 elements  172
+  total    800 ms (prep     3, draw    795)  nodes  44 edges  94 dummies  84 widest rank  35 elements  128
+  total    697 ms (prep     7, draw    688)  nodes  33 edges  65 dummies 359 widest rank  29 elements  392
+  total    681 ms (prep     6, draw    672)  nodes  56 edges 113 dummies 174 widest rank  38 elements  230
+  total    592 ms (prep     1, draw    589)  nodes  57 edges  70 dummies   0 widest rank  53 elements   57
+  total    510 ms (prep     1, draw    507)  nodes  58 edges  71 dummies   0 widest rank  53 elements   58
+  total    442 ms (prep     1, draw    440)  nodes  37 edges  36 dummies   0 widest rank  29 elements   37
+  total    554 ms (prep     5, draw    548)  nodes  42 edges  89 dummies 173 widest rank  41 elements  215
+  total    415 ms (prep     1, draw    413)  nodes  36 edges  35 dummies   0 widest rank  28 elements   36
+  total    449 ms (prep     5, draw    442)  nodes  87 edges 112 dummies 203 widest rank  14 elements  290
+  total    416 ms (prep     4, draw    411)  nodes  34 edges  69 dummies 195 widest rank  24 elements  229
+  total    445 ms (prep     1, draw    443)  nodes  50 edges  49 dummies   0 widest rank  39 elements   50
+  total    411 ms (prep     1, draw    408)  nodes  36 edges  61 dummies   2 widest rank  20 elements   38
+  total    413 ms (prep     4, draw    407)  nodes  71 edges  93 dummies 213 widest rank  25 elements  284
+  total    310 ms (prep     1, draw    309)  nodes  40 edges  39 dummies   0 widest rank  31 elements   40
+  total    190 ms (prep     2, draw    187)  nodes  28 edges  37 dummies  85 widest rank   8 elements  113
+  total    415 ms (prep     1, draw    413)  nodes  52 edges  51 dummies   0 widest rank  50 elements   52
+  total    409 ms (prep     8, draw    400)  nodes  49 edges  65 dummies 372 widest rank  13 elements  421
+  total    354 ms (prep     1, draw    352)  nodes  76 edges  75 dummies   0 widest rank  26 elements   76
+  total    238 ms (prep     1, draw    236)  nodes  17 edges  38 dummies  29 widest rank  18 elements   46
+  total    332 ms (prep     1, draw    330)  nodes  53 edges  52 dummies   0 widest rank  28 elements   53
+  total    273 ms (prep     0, draw    271)  nodes  26 edges  25 dummies   0 widest rank  25 elements   26
+all 17836 parsed flowcharts: widest rank p50 3 p99 12 p99.9 29 max 101; elements p99 60 p99.9 177 max 2798
+  widest rank > 30: 14
+  widest rank > 40: 9
+  widest rank > 60: 5
+  elements > 200: 15
+  elements > 300: 4
+  elements > 400: 3

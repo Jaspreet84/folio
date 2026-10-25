@@ -1,0 +1,102 @@
+
+============================== tune blocks 17450
+kinds {'flow': 12706, 'other': 2522, 'seq': 2221, 'none': 1}
+
+-- flow total 12706 {'parsed': 12492, 'source': 207, 'crash': 2, 'cap': 5}
+   top source reasons: [('unterminated node shape', 31), ('text after a quoted label', 10), ('no nodes', 7), ('expected a node at ""', 7), ('unterminated quote', 7), ('unexpected text "]"', 7), ('edge to an empty subgraph', 5), ('subgraph without "end"', 3)]
+   crashes: [('KeyError 11', 1), ('KeyError 28', 1)]
+   keywords {'flowchart': 8358, 'graph': 4348}
+   dirs {'LR': 4839, 'TD': 7625, 'BT': 17, 'RL': 11} subgraph 2551 LR self-loop 37 n==0 0 n==1 18 m==0 109
+   drawn share at width                                            38       51       78      100      118      158
+   fits only, orig (old definition), all parsed                 42.7%    60.8%    82.5%    89.3%    92.7%    96.6%   (n=12492)
+   fits only, orig, no subgraphs                                47.8%    67.0%    87.7%    93.3%    95.6%    98.3%   (n=9941)
+   strict, orig, no subgraphs                                   45.8%    62.1%    78.3%    82.3%    84.0%    86.1%   (n=9941)
+   strict, fix, no subgraphs [ladder A]                         47.9%    67.0%    87.7%    93.2%    95.5%    98.2%   (n=9941)
+   strict, fix, no subgraphs [ladder B]                         48.1%    67.5%    88.2%    93.5%    95.7%    98.2%   (n=9941)
+   strict, fix, no subgraphs [ladder C]                         48.4%    67.9%    88.4%    93.6%    95.7%    98.2%   (n=9941)
+   strict, fix, subgraph subset, frames NOT drawn               22.9%    36.5%    61.9%    73.7%    81.3%    89.8%   (n=2551)
+   strict, fix, all parsed, subgraphs -> outline (M2 policy)    38.1%    53.3%    69.8%    74.1%    76.0%    78.1%
+   at 78, orig mode, of 8722 fitting drawings (no subgraphs): any 952 (10.9%), text over line 0 (0.0%), false connection 871 (10.0%), crossing cells 707 (8.1%), bad overlap 313 (3.6%), hard-constraint conflict 19 (0.2%), dropped LR self-loop 11 (0.1%)
+   at 78, fix mode, of 8726 fitting drawings (no subgraphs): any 20 (0.2%), text over line 0 (0.0%), false connection 8 (0.1%), crossing cells 755 (8.7%), bad overlap 3 (0.0%), hard-constraint conflict 3 (0.0%), dropped LR self-loop 11 (0.1%)
+   steps used at 78 (strict fix, ladder A): {'T': 2291, 'L16': 1050, 'N': 4498, 'TC': 74, 'C': 311, 'L8': 496, 'outline': 1221}
+   steps used at 78 (strict fix, ladder B): {'T': 2070, 'L16': 1011, 'N': 4498, 'L16lr': 333, 'TC': 62, 'C': 311, 'L8': 481, 'outline': 1175}
+   steps used at 78 (strict fix, ladder C): {'L8lr': 503, 'T': 1669, 'L16': 966, 'N': 4498, 'L16lr': 333, 'C': 311, 'L8': 449, 'outline': 1158, 'TC': 54}
+   LR (4079) at 51 -> A: kept LR 390, turned 2689, drawn 75.5%, median height x3.44 | B: kept LR 487, turned 2642, drawn 76.7%, median height x3.40 | C: kept LR 659, turned 2506, drawn 77.6%, median height x3.30
+   LR (4079) at 78 -> A: kept LR 1002, turned 2809, drawn 93.4%, median height x2.58 | B: kept LR 1335, turned 2522, drawn 94.6%, median height x2.43 | C: kept LR 1838, turned 2036, drawn 95.0%, median height x1.86
+   LR (4079) at 100 -> A: kept LR 1587, turned 2381, drawn 97.3%, median height x2.00 | B: kept LR 2170, turned 1831, drawn 98.1%, median height x1.36 | C: kept LR 2670, turned 1345, drawn 98.4%, median height x1.29
+   CJK subset n=3137: fix 38:39.8% 51:62.4% 78:86.0% ; fix + breaks between wide chars 38:50.9% 51:70.2% 78:89.3%
+   python time per flowchart, fix mode, all steps (4 to 8 steps): p50 50.5 ms p95 176.0 p99 345.3 max 31805 ms
+   dummies per flowchart: p50 2 p90 15 p99 42 max 2732
+     dummies 0-50: n=12401 time p50 50 ms p99 296 ms max 9232 ms
+     dummies 50-100: n=68 time p50 273 ms p99 869 ms max 869 ms
+     dummies 100-200: n=15 time p50 663 ms p99 3696 ms max 3696 ms
+     dummies 200-400: n=6 time p50 1194 ms p99 2598 ms max 2598 ms
+     dummies 400-inf: n=2 time p50 31805 ms p99 31805 ms max 31805 ms
+     slow: 31805 ms nodes 66 edges 250 dummies 2732 ranks 41
+     slow: 14831 ms nodes 49 edges 207 dummies 2705 ranks 65
+     slow: 9232 ms nodes 83 edges 82 dummies 0 ranks 2
+     slow: 8672 ms nodes 79 edges 78 dummies 0 ranks 2
+     slow: 4809 ms nodes 80 edges 128 dummies 38 ranks 3
+
+-- seq total 2221 {'parsed': 2163, 'source': 58}
+   top source reasons: [('unexpected statement "base64,..."', 2), ('unexpected statement "```"', 2), ('unexpected statement "activate Server DB"', 2), ('unexpected statement "pinned IdP signing t"', 2), ('unexpected statement "activate HTLC Coordi"', 2), ('unexpected statement "browser stays closed"', 1), ('unexpected statement "case siyuan"', 1), ('unexpected statement "Alt 已知YAML类型"', 1)]
+   drawn share at width                                            38       51       78      100      118      158
+   fits only, orig (old definition)                             12.8%    27.7%    67.3%    86.8%    94.3%    99.3%   (n=2163)
+   strict, orig (messages only)                                 12.1%    20.3%    32.9%    35.0%    35.3%    35.3%   (n=2163)
+   strict, orig (messages and frames)                           10.4%    16.9%    27.0%    28.7%    28.9%    28.9%   (n=2163)
+   strict, fix                                                  12.7%    27.0%    65.1%    83.3%    90.2%    94.8%   (n=2163)
+   diagrams with a message that skips a lifeline: 1369 63.3%
+   at 78, orig mode, of 1456 fitting drawings: text over line 40 (2.7%), message junction 720 (49.5%), frame junction 351 (24.1%), bad overlap 25 (1.7%)
+   at 78, fix mode, of 1456 fitting drawings: text over line 40 (2.7%), message junction 0 (0.0%), frame junction 0 (0.0%), bad overlap 25 (1.7%)
+   CJK subset n=961: fix 38:5.6% 51:15.9% 78:54.2% ; with breaks 38:8.0% 51:21.0% 78:61.1%
+   python time per sequence diagram, fix mode, 4 steps: p50 52.9 ms p99 308.7 max 1202 ms
+
+============================== held blocks 6496
+kinds {'flow': 5632, 'seq': 423, 'other': 441}
+
+-- flow total 5632 {'parsed': 5344, 'source': 279, 'crash': 9}
+   top source reasons: [('unexpected text "#[C#]"', 82), ('unexpected text "++[C++]"', 76), ('unterminated node shape', 22), ('edge to an empty subgraph', 13), ('unterminated quote', 10), ('expected a node at ""', 5), ('subgraph without a name', 4), ('unexpected text "#8["SCAN tbl2 ("', 4)]
+   crashes: [('KeyError 9', 3), ('KeyError 7', 2), ('KeyError 16', 1), ('KeyError 15', 1), ('KeyError 8', 1)]
+   keywords {'graph': 2290, 'flowchart': 3342}
+   dirs {'LR': 2929, 'TD': 2401, 'BT': 11, 'RL': 3} subgraph 717 LR self-loop 16 n==0 0 n==1 8 m==0 41
+   drawn share at width                                            38       51       78      100      118      158
+   fits only, orig (old definition), all parsed                 47.0%    65.5%    90.1%    95.0%    96.5%    97.8%   (n=5344)
+   fits only, orig, no subgraphs                                49.6%    67.6%    93.0%    97.3%    98.4%    99.4%   (n=4627)
+   strict, orig, no subgraphs                                   47.0%    62.3%    83.0%    85.5%    86.2%    86.8%   (n=4627)
+   strict, fix, no subgraphs [ladder A]                         49.6%    67.5%    92.9%    97.1%    98.2%    99.2%   (n=4627)
+   strict, fix, no subgraphs [ladder B]                         49.8%    67.9%    94.0%    97.3%    98.3%    99.2%   (n=4627)
+   strict, fix, no subgraphs [ladder C]                         50.1%    68.4%    94.5%    97.4%    98.3%    99.2%   (n=4627)
+   strict, fix, subgraph subset, frames NOT drawn               30.7%    51.5%    71.3%    80.2%    84.2%    88.0%   (n=717)
+   strict, fix, all parsed, subgraphs -> outline (M2 policy)    42.9%    58.5%    80.4%    84.1%    85.0%    85.9%
+   at 78, orig mode, of 4304 fitting drawings (no subgraphs): any 469 (10.9%), text over line 1 (0.0%), false connection 424 (9.9%), crossing cells 366 (8.5%), bad overlap 180 (4.2%), hard-constraint conflict 3 (0.1%), dropped LR self-loop 5 (0.1%)
+   at 78, fix mode, of 4303 fitting drawings (no subgraphs): any 10 (0.2%), text over line 1 (0.0%), false connection 4 (0.1%), crossing cells 382 (8.9%), bad overlap 0 (0.0%), hard-constraint conflict 0 (0.0%), dropped LR self-loop 5 (0.1%)
+   steps used at 78 (strict fix, ladder A): {'T': 1372, 'N': 2209, 'outline': 329, 'L16': 385, 'C': 104, 'TC': 37, 'L8': 191}
+   steps used at 78 (strict fix, ladder B): {'T': 1230, 'N': 2209, 'outline': 276, 'L16lr': 225, 'L16': 370, 'C': 104, 'TC': 34, 'L8': 179}
+   steps used at 78 (strict fix, ladder C): {'L8lr': 260, 'N': 2209, 'outline': 253, 'T': 1029, 'L16lr': 225, 'L16': 347, 'C': 104, 'TC': 30, 'L8': 170}
+   LR (2672) at 51 -> A: kept LR 192, turned 1576, drawn 66.2%, median height x3.56 | B: kept LR 232, turned 1555, drawn 66.9%, median height x3.53 | C: kept LR 336, turned 1470, drawn 67.6%, median height x3.40
+   LR (2672) at 78 -> A: kept LR 930, turned 1598, drawn 94.6%, median height x2.38 | B: kept LR 1155, turned 1426, drawn 96.6%, median height x2.00 | C: kept LR 1415, turned 1189, drawn 97.5%, median height x1.52
+   LR (2672) at 100 -> A: kept LR 1290, turned 1350, drawn 98.8%, median height x1.19 | B: kept LR 1566, turned 1084, drawn 99.2%, median height x1.00 | C: kept LR 1875, turned 779, drawn 99.3%, median height x1.00
+   CJK subset n=539: fix 38:55.3% 51:73.3% 78:91.1% ; fix + breaks between wide chars 38:62.7% 51:81.8% 78:94.2%
+   python time per flowchart, fix mode, all steps (4 to 8 steps): p50 54.4 ms p95 162.4 p99 326.4 max 4516 ms
+   dummies per flowchart: p50 4 p90 13 p99 43 max 195
+     dummies 0-50: n=5304 time p50 54 ms p99 268 ms max 1237 ms
+     dummies 50-100: n=34 time p50 292 ms p99 2848 ms max 2848 ms
+     dummies 100-200: n=6 time p50 2102 ms p99 4516 ms max 4516 ms
+     slow: 4516 ms nodes 19 edges 72 dummies 146 ranks 11
+     slow: 4480 ms nodes 25 edges 67 dummies 170 ranks 19
+     slow: 2848 ms nodes 44 edges 94 dummies 84 ranks 8
+     slow: 2102 ms nodes 56 edges 113 dummies 174 ranks 13
+     slow: 1275 ms nodes 34 edges 69 dummies 195 ranks 21
+
+-- seq total 423 {'parsed': 412, 'source': 11}
+   top source reasons: [('unexpected statement "the sweeps retry"', 1), ('unexpected statement "barrier holds (B sti"', 1), ('unexpected statement "Title: BeanFactoryPo"', 1), ('unexpected statement "Morty-XRick: Peerlis"', 1), ('unexpected statement "Title: Block Proposa"', 1), ('unexpected statement "activate Player X"', 1), ('unexpected statement "activate Share Exten"', 1), ('unexpected statement "activate Cypress Ser"', 1)]
+   drawn share at width                                            38       51       78      100      118      158
+   fits only, orig (old definition)                             11.2%    45.9%    81.1%    93.4%    96.4%    99.3%   (n=412)
+   strict, orig (messages only)                                 10.2%    35.9%    43.9%    45.6%    45.9%    45.9%   (n=412)
+   strict, orig (messages and frames)                           10.0%    33.5%    39.6%    40.8%    40.8%    40.8%   (n=412)
+   strict, fix                                                  11.2%    45.6%    78.6%    89.8%    92.5%    95.1%   (n=412)
+   diagrams with a message that skips a lifeline: 218 52.9%
+   at 78, orig mode, of 334 fitting drawings: text over line 14 (4.2%), message junction 150 (44.9%), frame junction 79 (23.7%), bad overlap 3 (0.9%)
+   at 78, fix mode, of 334 fitting drawings: text over line 14 (4.2%), message junction 0 (0.0%), frame junction 0 (0.0%), bad overlap 3 (0.9%)
+   CJK subset n=36: fix 38:5.6% 51:33.3% 78:66.7% ; with breaks 38:13.9% 51:41.7% 78:75.0%
+   python time per sequence diagram, fix mode, 4 steps: p50 51.3 ms p99 422.7 max 1315 ms

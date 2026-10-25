@@ -1,0 +1,134 @@
+=== share.mmd orig flow N  [w h viol falsepairs crossings bad hard dropped] = [21, 10, 0, 2, 0, 2, 0, 0]
+    ┌───┐   ┌───┐
+    │ A │   │ B │
+    └─┬─┘   └─┬─┘
+      │       │
+  ┌───┴───┐   │
+  │       ├───┴───┐
+  ▾       ▾       ▾
+┌───┐   ┌───┐   ┌───┐
+│ C │   │ D │   │ E │
+└───┘   └───┘   └───┘
+=== share.mmd fix flow N  [w h viol falsepairs crossings bad hard dropped] = [21, 9, 0, 0, 0, 0, 0, 0]
+    ┌───┐    ┌───┐
+    │ A │    │ B │
+    └─┬─┘    └─┬─┘
+      │        │
+  ┌───┴──┐ ┌───┴──┐
+  ▾      ▾ ▾      ▾
+┌───┐   ┌───┐   ┌───┐
+│ C │   │ D │   │ E │
+└───┘   └───┘   └───┘
+=== cross2.mmd orig flow N  [w h viol falsepairs crossings bad hard dropped] = [19, 16, 0, 8, 1, 0, 0, 0]
+┌───┐   ┌───┐
+│ A │   │ B │
+└─┬─┘   └─┬─┘
+  │       │
+  │   ┌───┴───────┐
+  ├───┼───────┐   │
+  │   ▾       ▾   │
+  │ ┌───┐   ┌───┐ │
+  │ │ D │   │ C │ │
+  │ └─┬─┘   └─┬─┘ │
+  │   │       │   │
+  └─┬─┘       └─┬─┘
+    ▾           ▾
+  ┌───┐       ┌───┐
+  │ E │       │ F │
+  └───┘       └───┘
+=== cross2.mmd fix flow N  [w h viol falsepairs crossings bad hard dropped] = [19, 16, 0, 0, 1, 0, 0, 0]
+┌───┐   ┌───┐
+│ A │   │ B │
+└─┬─┘   └─┬─┘
+  │       │
+  │   ┌───┴───────┐
+  ├───│───────┐   │
+  │   ▾       ▾   │
+  │ ┌───┐   ┌───┐ │
+  │ │ D │   │ C │ │
+  │ └─┬─┘   └─┬─┘ │
+  │   │       │   │
+  └┐ ┌┘       └┐ ┌┘
+   ▾ ▾         ▾ ▾
+  ┌───┐       ┌───┐
+  │ E │       │ F │
+  └───┘       └───┘
+=== cross.mmd orig flow N  [w h viol falsepairs crossings bad hard dropped] = [27, 10, 0, 0, 1, 4, 0, 0]
+┌───────┐   ┌───────┐
+│ Alpha │   │ Beta  │
+└───┬───┘   └───┬───┘
+    │           │
+    └─────┬─────┼─────┐
+          ├─────┴─────┤
+          ▾           ▾
+      ┌───────┐   ┌───────┐
+      │ Delta │   │ Gamma │
+      └───────┘   └───────┘
+=== cross.mmd fix flow N  [w h viol falsepairs crossings bad hard dropped] = [27, 10, 0, 0, 1, 0, 0, 0]
+┌───────┐   ┌───────┐
+│ Alpha │   │ Beta  │
+└───┬───┘   └───┬───┘
+    │           │
+    │      ┌────┴──────┐
+    └────┬─│─────────┐ │
+         ▾ ▾         ▾ ▾
+      ┌───────┐   ┌───────┐
+      │ Delta │   │ Gamma │
+      └───────┘   └───────┘
+=== skip.mmd orig seq N  [w h viol badmsg framej crossings bad] = [21, 11, 0, 1, 0, 1, 0]
+┌───┐   ┌───┐   ┌───┐
+│ A │   │ B │   │ C │
+└─┬─┘   └─┬─┘   └─┬─┘
+  │       │       │
+  │ skip over B   │
+  ├───────┼──────▸│
+  │       │       │
+  │ back  │       │
+  │◂──────┤       │
+  │       │       │
+  │       │       │
+=== skip.mmd fix seq N  [w h viol badmsg framej crossings bad] = [21, 11, 0, 0, 0, 1, 0]
+┌───┐   ┌───┐   ┌───┐
+│ A │   │ B │   │ C │
+└─┬─┘   └─┬─┘   └─┬─┘
+  │       │       │
+  │ skip over B   │
+  ├──────────────▸│
+  │       │       │
+  │ back  │       │
+  │◂──────┤       │
+  │       │       │
+  │       │       │
+=== fan.mmd orig flow N  [w h viol falsepairs crossings bad hard dropped] = [25, 15, 0, 6, 0, 0, 0, 0]
+                    ┌───┐
+                    │ A │
+                    └─┬─┘
+                      │
+  ┌───────┬───────┬───┤
+  ▾       ▾       ▾   │
+┌───┐   ┌───┐   ┌───┐ │
+│ B │   │ C │   │ D │ │
+└─┬─┘   └─┬─┘   └─┬─┘ │
+  │       │       │   │
+  └───────┴───┬───┴───┘
+              ▾
+            ┌───┐
+            │ E │
+            └───┘
+=== fan.mmd fix flow N  [w h viol falsepairs crossings bad hard dropped] = [25, 16, 0, 0, 0, 0, 0, 0]
+                    ┌───┐
+                    │ A │
+                    └─┬─┘
+                      │
+  ┌───────┬───────┬───┤
+  ▾       ▾       ▾   │
+┌───┐   ┌───┐   ┌───┐ │
+│ B │   │ C │   │ D │ │
+└─┬─┘   └─┬─┘   └─┬─┘ │
+  │       │       │   │
+  └───────┴───┬───┘   │
+              │ ┌─────┘
+              ▾ ▾
+             ┌───┐
+             │ E │
+             └───┘
