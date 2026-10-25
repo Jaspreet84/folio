@@ -19,7 +19,7 @@ cargo build --release
 ## Use
 
 ```sh
-folio                       # pick a Markdown file in the current folder
+folio .                     # pick a Markdown file in the current folder
 folio FILE.md               # read a file
 folio docs/                 # pick a file in a folder
 curl -s URL | folio         # read from stdin

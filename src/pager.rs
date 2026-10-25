@@ -31,6 +31,9 @@ const WORDS_PER_MINUTE: u32 = 230;
 /// How long to wait for a key before checking the file for changes.
 const WATCH_INTERVAL: Duration = Duration::from_millis(500);
 
+/// How often to redraw the file picker while it is still scanning.
+const SCAN_REFRESH: Duration = Duration::from_millis(50);
+
 /// How many places the back list keeps.
 const MAX_HISTORY: usize = 200;
 
@@ -232,7 +235,7 @@ impl Pager {
                 (page, Screen::Doc, None, root, Some(At::Resume))
             }
             Start::Picker(root) => {
-                let picker = Picker::scan(&root);
+                let picker = Picker::start(&root);
                 (Page::from_text(String::new(), String::new()), Screen::Picker, Some(picker), root, None)
             }
         };
@@ -280,6 +283,7 @@ impl Pager {
                 self.body_h = usize::from(size.height.saturating_sub(3)).max(1);
                 let (help, theme, message) = (self.help, &self.theme, self.message.as_deref());
                 if let Some(picker) = self.picker.as_mut() {
+                    picker.pull();
                     terminal.draw(|f| {
                         let cursor = picker.draw(f.buffer_mut(), area, theme, message);
                         if help {
@@ -306,7 +310,9 @@ impl Pager {
                 let frame = terminal.draw(|f| cursor = self.draw(f, &geo))?;
                 write_hyperlinks(frame.buffer, &links, cursor)?;
             }
-            if event::poll(WATCH_INTERVAL)?
+            // While the picker is still scanning, redraw often so files appear as they are found.
+            let scanning = self.screen == Screen::Picker && self.picker.as_ref().is_some_and(Picker::scanning);
+            if event::poll(if scanning { SCAN_REFRESH } else { WATCH_INTERVAL })?
                 && let Event::Key(key) = event::read()?
                 && key.kind != KeyEventKind::Release
             {
@@ -542,6 +548,8 @@ impl Pager {
         self.remember();
         self.page = page;
         self.screen = Screen::Doc;
+        // Dropping the picker stops its scan, if one is still running.
+        self.picker = None;
         self.view = Rendered::default();
         self.raw = false;
         self.search = Search::default();
@@ -574,7 +582,7 @@ impl Pager {
     fn show_picker(&mut self, root: PathBuf) -> bool {
         self.remember();
         self.save_state();
-        let mut picker = Picker::scan(&root);
+        let mut picker = Picker::start(&root);
         if let Some(path) = &self.page.path {
             picker.select_path(path);
         }

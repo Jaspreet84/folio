@@ -173,7 +173,7 @@ into arrow keys.
 ## Command line
 
 ```
-folio                       # pick a Markdown file in the current folder
+folio .                     # pick a Markdown file in the current folder
 folio FILE                  # read a file
 folio FOLDER                # pick a file in that folder
 cat FILE | folio            # read from stdin
@@ -184,11 +184,25 @@ folio --theme light FILE    # force a theme (default: ask the terminal)
 folio --no-watch FILE       # don't reload when the file changes
 ```
 
+With no file and nothing piped in, folio prints its help (with examples)
+instead of guessing what to show.
+
 The file picker lists Markdown files under the folder (up to 12 levels and
 5,000 files), skipping hidden files and anything `.gitignore` excludes. Each
 folder's README comes first, and each file's first heading is shown beside
 its name. `/` filters by name or title. When output isn't a terminal, a
 folder prints its README instead.
+
+The folder is scanned on a background thread, so the picker appears at once
+(about 30 ms) and fills in as files are found, with "Scanning…" in the
+header until it finishes. The scan stays on one file system (so it doesn't
+wander into `/mnt/c`, network mounts or `/proc`), and skips `node_modules`,
+folders marked as caches with a `CACHEDIR.TAG` file (such as Rust's
+`target/`), and `~/Library` on macOS. It stops when the picker closes.
+
+Before this change, the picker walked the whole folder before drawing:
+2.6 s for `/usr` (53,000 files, 66 of them Markdown) and over 30 s for `/`,
+which is why running folio with no arguments in a big folder looked frozen.
 
 When output is not a terminal, folio prints the rendered document once.
 When the document fits on one screen, it is printed instead of paged (like

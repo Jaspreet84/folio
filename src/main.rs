@@ -3,20 +3,30 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, ValueEnum};
+use clap::{CommandFactory, Parser, ValueEnum};
 
 use folio::highlight::Highlighter;
 use folio::pager::{Options, Page, Pager, Start};
 use folio::theme::{self, Depth, Theme};
 use folio::{ansi, layout, links, state};
 
+const EXAMPLES: &str = "\
+Examples:
+  folio README.md             Read a file
+  folio .                     Pick a Markdown file in this folder
+  folio docs/                 Pick a Markdown file in docs/
+  curl -s URL | folio         Read from a pipe
+  folio --paging never x.md   Print instead of paging, like cat
+
+While reading, press ? to see the keys.";
+
 /// Read Markdown in the terminal.
 #[derive(Parser)]
-#[command(name = "folio", version)]
+#[command(name = "folio", version, about, after_help = EXAMPLES)]
 struct Args {
-    /// Markdown file to read, or a folder to pick a file from. With no
-    /// argument, reads stdin if something is piped in, or else shows the
-    /// Markdown files in the current folder. "-" reads stdin.
+    /// Markdown file to read, or a folder to pick a file from ("." for the
+    /// current folder). Reads stdin when something is piped in or the file
+    /// is "-".
     file: Option<PathBuf>,
 
     /// When to page the output. "auto" pages when output is a terminal and
@@ -68,6 +78,20 @@ fn main() -> ExitCode {
 
 fn run() -> Result<()> {
     let args = Args::parse();
+    // Nothing to read: no file and nothing piped in. Show how to use folio
+    // instead of waiting on the keyboard or scanning the current folder.
+    if args.file.is_none() && io::stdin().is_terminal() {
+        let color = match args.color {
+            When::Auto => clap::ColorChoice::Auto,
+            When::Always => clap::ColorChoice::Always,
+            When::Never => clap::ColorChoice::Never,
+        };
+        return match Args::command().color(color).print_help() {
+            // `folio | head -1` closes the pipe early; that's not an error.
+            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+            other => other.context("can't write the help"),
+        };
+    }
     let stdout_tty = io::stdout().is_terminal();
 
     let no_color_env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
@@ -97,7 +121,11 @@ fn run() -> Result<()> {
         When::Auto => stdout_tty,
     };
     let (term_w, term_h) = if stdout_tty {
-        ratatui::crossterm::terminal::size().map(|(w, h)| (usize::from(w), usize::from(h))).unwrap_or((80, 24))
+        // Some terminals (and serial consoles) report 0x0; treat that as unknown.
+        ratatui::crossterm::terminal::size()
+            .ok()
+            .filter(|&(w, h)| w > 0 && h > 0)
+            .map_or((80, 24), |(w, h)| (usize::from(w), usize::from(h)))
     } else {
         let cols = std::env::var("COLUMNS").ok().and_then(|c| c.parse().ok()).unwrap_or(80);
         (cols, 24)
@@ -105,11 +133,7 @@ fn run() -> Result<()> {
     let max_width = args.width.unwrap_or(if stdout_tty { 100 } else { 80 }).max(10);
     let options = Options { max_width, watch: !args.no_watch, state_file: state::default_path() };
 
-    let folder = match args.file.as_deref() {
-        Some(p) if p.is_dir() => Some(p.to_path_buf()),
-        None if io::stdin().is_terminal() => Some(PathBuf::from(".")),
-        _ => None,
-    };
+    let folder = args.file.as_deref().filter(|p| p.is_dir()).map(Path::to_path_buf);
     let page = match (folder, args.file.as_deref()) {
         (Some(dir), _) if page_mode => {
             let dir = dir.canonicalize().with_context(|| format!("can't open {}", dir.display()))?;
