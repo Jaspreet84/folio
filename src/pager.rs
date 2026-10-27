@@ -86,6 +86,7 @@ impl Page {
         let bytes = std::fs::read(&path)?;
         let source = String::from_utf8_lossy(&bytes).into_owned();
         let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+        let name = doc::clean_line(&name);
         Ok(Page { stamp: stamp(&path), doc: doc::parse(&source), path: Some(path), name, source })
     }
 
@@ -536,7 +537,7 @@ impl Pager {
             Some(p) => match Page::open(p) {
                 Ok(page) => page,
                 Err(e) => {
-                    self.message = Some(format!("Can't open {}: {e}", p.display()));
+                    self.message = Some(doc::clean_line(&format!("Can't open {}: {e}", p.display())));
                     return false;
                 }
             },

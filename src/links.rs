@@ -105,30 +105,28 @@ fn repo_root(start: &Path) -> Option<PathBuf> {
 }
 
 /// The URL to put in an OSC 8 hyperlink, so clicking the text in the
-/// terminal opens it. Anchors and unknown schemes get none.
+/// terminal opens it. Clicking bypasses folio (the terminal hands the URL to
+/// the system), so it gets the same policy as following a link: web and
+/// mail links, and local Markdown files that exist. Nothing else, so a
+/// document can't make one click run a program.
 pub fn osc8_target(url: &str, base: Option<&Path>) -> Option<String> {
-    let url = url.trim();
-    if url.starts_with('#') || url.is_empty() {
-        return None;
+    match classify(url, base) {
+        LinkAction::External(url) => Some(url),
+        LinkAction::File { path, fragment } => {
+            let full = path.canonicalize().unwrap_or(path);
+            let full = full.to_string_lossy();
+            if !full.starts_with('/') {
+                return None;
+            }
+            let mut out = format!("file://{}", percent_encode(&full));
+            if let Some(f) = fragment {
+                out.push('#');
+                out.push_str(&percent_encode(&f));
+            }
+            Some(out)
+        }
+        LinkAction::Anchor(_) | LinkAction::Dir(_) | LinkAction::Refused(_) => None,
     }
-    if let Some(s) = scheme(url) {
-        let known = ["http", "https", "mailto", "ftp", "file"];
-        return known.contains(&s.to_ascii_lowercase().as_str()).then(|| url.to_string());
-    }
-    let (path, fragment) = split_fragment(url);
-    let base = base.map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
-    let full = base.join(path);
-    let full = full.canonicalize().unwrap_or(full);
-    let full = full.to_string_lossy();
-    if !full.starts_with('/') {
-        return None;
-    }
-    let mut out = format!("file://{}", percent_encode(&full));
-    if let Some(f) = fragment {
-        out.push('#');
-        out.push_str(&percent_encode(&f));
-    }
-    Some(out)
 }
 
 /// Open a web or mail link with the system's handler.
@@ -281,14 +279,33 @@ mod tests {
     }
 
     #[test]
-    fn builds_osc8_targets() {
+    fn builds_osc8_targets_only_for_safe_links() {
         assert_eq!(osc8_target("https://x.y/z", None).as_deref(), Some("https://x.y/z"));
+        assert_eq!(osc8_target("mailto:a@b.c", None).as_deref(), Some("mailto:a@b.c"));
         assert_eq!(osc8_target("#top", None), None);
         assert_eq!(osc8_target("javascript:x", None), None);
-        if cfg!(unix) {
-            let t = osc8_target("my file.md#a b", Some(Path::new("/docs"))).unwrap();
-            assert_eq!(t, "file:///docs/my%20file.md#a%20b");
+        assert_eq!(osc8_target("ftp://x.y/run.sh", None), None);
+
+        let dir = std::env::temp_dir().join(format!("folio-osc8-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Tool.app")).unwrap();
+        for f in ["my file.md", "setup.command", "run.sh"] {
+            std::fs::write(dir.join(f), "x").unwrap();
         }
+        let base = Some(dir.as_path());
+        // A Markdown file that exists gets a link (file:// URLs are built
+        // for Unix paths only)...
+        if cfg!(unix) {
+            let md = osc8_target("my file.md#a b", base).unwrap();
+            assert!(md.starts_with("file://") && md.ends_with("my%20file.md#a%20b"), "{md}");
+        }
+        // ...but programs, folders, missing files and raw file: URLs don't.
+        for url in ["setup.command", "run.sh", "Tool.app", "missing.md"] {
+            assert_eq!(osc8_target(url, base), None, "{url}");
+        }
+        let raw = format!("file://{}/setup.command", dir.to_string_lossy().replace('\\', "/"));
+        assert_eq!(osc8_target(&raw, base), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

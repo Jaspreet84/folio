@@ -134,6 +134,11 @@ A number before a motion repeats it (`5j`, `3]]`).
 - Anything else is refused with a message, including local files that
   aren't Markdown. This stops a document from tricking the reader into
   launching a program. `y` still copies the link.
+- Clickable OSC 8 links follow the same rule, because a click goes from
+  the terminal straight to the system: only web and mail links and local
+  Markdown files that exist are made clickable. (Before 2026-10-27 any
+  local file was, so a README could link `setup.command` and one click in
+  kitty or WezTerm would run it.)
 
 ### History, marks and remembered positions
 
@@ -326,9 +331,19 @@ How it's built (code in `src/finder.rs`, `src/finder-helper.js`):
   detected from each terminal's own variables first (kitty and Alacritty
   don't set `TERM_PROGRAM`, and tmux replaces it).
 - **Default app.** `--make-default` calls NSWorkspace through
-  `osascript -l JavaScript`. Up to macOS 26.3 the change is silent; from
-  26.4 macOS asks the user. Without the flag, folio prints the manual
-  steps (Get Info, Open with, Change All).
+  `osascript -l JavaScript`, for `.md` and `.markdown` (they can have
+  different types before macOS 27). Up to macOS 26.3 the change is silent;
+  from 26.4 macOS asks the user, so folio says so first and waits up to a
+  minute. Without the flag, folio prints the manual steps (Get Info, Open
+  with, Change All).
+- **Safe replacement.** The new app is built and signed next to the old
+  one (`.Folio-<pid>.app`) and only then swapped in, so a failed reinstall
+  keeps the working copy. A `Folio.app` with another bundle id is never
+  unregistered or removed; install refuses and suggests `--app-dir`.
+- **Failures stay visible.** folio runs under a small `sh` wrapper (paths
+  passed as arguments, never in the script text) that keeps the window
+  open with the exit status if folio fails. Opening Folio.app itself asks
+  for a file instead of scanning the home folder.
 - **Uninstall** removes the app only if its bundle id is folio's.
 
 CI (`.github/workflows/ci.yml`) runs the tests on Linux, and on macOS 15,

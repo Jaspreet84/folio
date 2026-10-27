@@ -299,7 +299,7 @@ impl Picker {
             if self.entries.len() == 1 { "" } else { "s" }
         );
         let room = w.saturating_sub(width(&count) + 1);
-        let title = truncate(&format!(" folio  ·  {}", self.root.display()), room);
+        let title = truncate(&crate::doc::clean_line(&format!(" folio  ·  {}", self.root.display())), room);
         buf.set_string(area.x, area.y, &title, t.bar_accent);
         if width(&count) + 4 < w {
             buf.set_string(area.x + (w - width(&count)) as u16, area.y, &count, t.bar);
@@ -414,6 +414,7 @@ fn scan(root: &Path, tx: &Sender<Found>, stop: &AtomicBool) {
         count += 1;
         let path = entry.path().to_path_buf();
         let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+        let rel = crate::doc::clean_line(&rel);
         let title = if count <= MAX_TITLES { read_title(&path) } else { None };
         let sort = sort_key(&rel);
         if tx.send(Found::Entry(Entry { rel, path, title, sort })).is_err() {

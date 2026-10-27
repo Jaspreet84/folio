@@ -342,6 +342,12 @@ pub fn clean(s: &str) -> String {
         .collect()
 }
 
+/// Like [`clean`], for text shown on one line (file names, paths): every
+/// control character, newlines and tabs included, becomes U+FFFD.
+pub fn clean_line(s: &str) -> String {
+    s.chars().map(|c| if c.is_control() { '\u{fffd}' } else { c }).collect()
+}
+
 /// Turn an HTML block into readable text: drop tags and comments, keep image
 /// alt text, turn block-level tags into line breaks, decode common entities.
 pub fn strip_html(html: &str) -> String {

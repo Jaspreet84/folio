@@ -72,7 +72,7 @@ struct Args {
     make_default: bool,
 
     /// Where to put Folio.app (default ~/Applications).
-    #[arg(long, value_name = "DIR", hide = true)]
+    #[arg(long, value_name = "DIR", help_heading = "Finder (macOS)")]
     app_dir: Option<PathBuf>,
 
     /// Used by Folio.app: open FILE in folio in a new terminal window.
@@ -98,7 +98,9 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("folio: {e:#}");
+            // Errors can quote file names; never let one send escape
+            // sequences to the terminal.
+            eprintln!("folio: {}", folio::doc::clean(&format!("{e:#}")));
             ExitCode::FAILURE
         }
     }
@@ -116,7 +118,8 @@ fn run() -> Result<()> {
         let done = finder::uninstall(args.app_dir.as_deref())?;
         match done.app {
             Some(app) => println!("Removed {}.", app.display()),
-            None => println!("Folio.app isn't installed."),
+            None if done.notes.is_empty() => println!("Folio.app isn't installed."),
+            None => {}
         }
         for note in done.notes {
             println!("{note}");
@@ -216,8 +219,9 @@ fn run() -> Result<()> {
 
 fn install_finder(args: &Args) -> Result<()> {
     let terminal = args.terminal.unwrap_or_else(|| Terminal::detect(&|k: &str| std::env::var(k).ok()));
-    let options = finder::InstallOptions { app_dir: args.app_dir.clone(), terminal, make_default: args.make_default };
+    let options = finder::InstallOptions { app_dir: args.app_dir.clone(), terminal };
     let done = finder::install(&options)?;
+    let by_hand = "Get Info on a .md file, choose Folio under Open with, then Change All.";
     println!("Installed {}", done.app.display());
     println!("  Opens files in {} with {}.", done.terminal.app_name(), done.folio.display());
     for note in &done.notes {
@@ -225,16 +229,23 @@ fn install_finder(args: &Args) -> Result<()> {
     }
     println!();
     println!("In Finder, right-click a Markdown file and choose Open With > Folio.");
-    match done.default {
-        Some(Ok(())) => println!("Folio is now the default app for Markdown, so double-clicking opens it."),
-        Some(Err(e)) => {
-            println!("Couldn't make Folio the default app ({e}).");
-            println!("To do it by hand: Get Info on a .md file, choose Folio under Open with, then Change All.");
+    if done.is_default {
+        println!("Folio is the default app for Markdown, so double-clicking a file opens it.");
+    } else if args.make_default {
+        println!();
+        println!("Making Folio the default app for Markdown. macOS may ask you to confirm;");
+        println!("the dialog can open behind this window. Waiting up to a minute...");
+        io::stdout().flush().ok();
+        match finder::make_default(&done.app) {
+            Ok(()) => println!("Done: double-clicking a Markdown file now opens it in folio."),
+            Err(e) => {
+                println!("Folio isn't the default ({}).", folio::doc::clean(&format!("{e:#}")));
+                println!("To do it by hand: {by_hand}");
+            }
         }
-        None => {
-            println!("To open Markdown files with a double-click, run this again with --make-default,");
-            println!("or use Get Info on a .md file: choose Folio under Open with, then Change All.");
-        }
+    } else {
+        println!("To open Markdown files with a double-click, run this again with --make-default,");
+        println!("or do it by hand: {by_hand}");
     }
     println!();
     println!("If you move folio, run --install-finder again. Remove it with --uninstall-finder.");

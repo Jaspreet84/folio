@@ -135,6 +135,12 @@ pub enum Launch {
     CommandFile { bundle_id: &'static str, script: String },
 }
 
+/// Runs its arguments as a command; if that fails, keeps the window open
+/// until Return, so the error can be read. The command arrives as `$0` and
+/// `$@`, so no path is ever part of the script text.
+pub const HOLD_ON_FAILURE: &str =
+    r#""$0" "$@" || { s=$?; printf '\nfolio exited with status %s. Press Return to close.' "$s"; read _; }"#;
+
 /// The launch for `terminal`, running `folio --paging always [FILE]`. The
 /// pager is forced: a short document would otherwise be printed and folio
 /// would exit, and some terminals close the window when it does.
@@ -144,6 +150,7 @@ pub fn launch_plan(terminal: Terminal, folio: &Path, file: Option<&Path>) -> Lau
     let open = |options: &[&str]| {
         let mut args: Vec<String> = ["-n", "-b", terminal.bundle_id(), "--args"].iter().map(|s| s.to_string()).collect();
         args.extend(options.iter().map(|s| s.to_string()));
+        args.extend(["/bin/sh".to_string(), "-c".to_string(), HOLD_ON_FAILURE.to_string()]);
         args.extend(command.iter().cloned());
         Launch::Open(args)
     };
@@ -158,11 +165,14 @@ pub fn launch_plan(terminal: Terminal, folio: &Path, file: Option<&Path>) -> Lau
     }
 }
 
-/// A `.command` script that deletes itself, then replaces itself with
-/// `command`, so the terminal window runs folio directly.
+/// A `.command` script that deletes itself, then runs `command`, keeping
+/// the window open if it fails.
 pub fn command_script(command: &[String]) -> String {
     let quoted: Vec<String> = command.iter().map(|a| shell_quote(a)).collect();
-    format!("#!/bin/sh\nrm -f \"$0\"\nexec {}\n", quoted.join(" "))
+    format!(
+        "#!/bin/sh\nrm -f \"$0\"\n{} || {{ s=$?; printf '\\nfolio exited with status %s. Press Return to close.' \"$s\"; read _; }}\n",
+        quoted.join(" ")
+    )
 }
 
 /// Quote `s` for a POSIX shell: wrap it in single quotes, and write each
@@ -176,10 +186,11 @@ pub fn applescript_string(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', r"\\").replace('"', "\\\""))
 }
 
-/// The applet's source. Finder calls `on open` with the files; opening the
-/// app itself calls `on run`, which shows folio's file picker on the home
-/// folder. Values are literals, not `property` variables, because a signed
-/// applet can't rely on saving them.
+/// The applet's source. Finder calls `on open` with the files. Opening the
+/// app itself calls `on run`, which asks for a file (scanning the whole home
+/// folder would bring up privacy prompts and download iCloud files).
+/// Values are literals, not `property` variables, because a signed applet
+/// can't rely on saving them.
 pub fn applet_source(folio: &Path, terminal: Terminal) -> String {
     format!(
         r#"-- Folio: opens Markdown files from Finder in folio, in a terminal window.
@@ -192,7 +203,13 @@ on open theItems
 end open
 
 on run
-	launchFolio(POSIX path of (path to home folder))
+	try
+		activate
+		set chosen to choose file with prompt "Choose a Markdown file to read in folio" default location (path to documents folder)
+		launchFolio(POSIX path of chosen)
+	on error number -128
+		-- Cancelled.
+	end try
 end run
 
 on launchFolio(target)
@@ -243,6 +260,14 @@ pub fn stored_folio_path(exe: &Path, exists: &dyn Fn(&Path) -> bool) -> PathBuf 
     exe.to_path_buf()
 }
 
+/// The numbers of a dotted version such as "1.4.0", or `None` when the
+/// text doesn't start with one (development builds report a commit).
+pub fn parse_version(v: &str) -> Option<Vec<u64>> {
+    let head: String = v.trim().chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    let parts: Vec<u64> = head.split('.').map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    (parts.len() >= 2).then_some(parts)
+}
+
 /// Whether dotted version `have` is at least `need` ("1.10.0" > "1.4.0").
 pub fn version_at_least(have: &str, need: &str) -> bool {
     let parse = |v: &str| -> Vec<u64> {
@@ -264,7 +289,6 @@ pub struct InstallOptions {
     /// Where to put Folio.app; `~/Applications` when `None`.
     pub app_dir: Option<PathBuf>,
     pub terminal: Terminal,
-    pub make_default: bool,
 }
 
 pub struct Installed {
@@ -272,35 +296,22 @@ pub struct Installed {
     pub folio: PathBuf,
     /// The terminal files open in (may differ from the one asked for).
     pub terminal: Terminal,
-    /// The outcome of making Folio the default Markdown app, if asked.
-    pub default: Option<Result<(), String>>,
+    /// Folio is the default app for `.md` files after installing.
+    pub is_default: bool,
     /// Things the reader should know.
     pub notes: Vec<String>,
 }
 
-/// Build Folio.app and register it with Launch Services.
+/// Build Folio.app and register it with Launch Services. The new app is
+/// built and signed next to the old one first, so a failure leaves any
+/// working copy in place.
 pub fn install(options: &InstallOptions) -> Result<Installed> {
     check_macos()?;
     let mut notes = Vec::new();
     let exe = std::env::current_exe().context("can't find folio's own path")?;
     let exe = std::path::absolute(&exe).unwrap_or(exe);
     let folio = stored_folio_path(&exe, &|p: &Path| p.is_file());
-
-    let mut terminal = options.terminal;
-    let (_, term_version) = find_app(terminal.bundle_id())
-        .with_context(|| format!("{} isn't installed; choose another with --terminal", terminal.app_name()))?;
-    if let Some(need) = terminal.min_version()
-        && !version_at_least(&term_version, need)
-    {
-        notes.push(format!(
-            "{} {term_version} can't start a command from Finder (it needs {need}); using Terminal instead. \
-             Run --install-finder again after updating it.",
-            terminal.app_name()
-        ));
-        terminal = Terminal::Terminal;
-    } else if terminal == Terminal::ITerm {
-        notes.push("iTerm2 asks before running each file; you can tell it not to ask again.".into());
-    }
+    let terminal = choose_terminal(options.terminal, &mut notes)?;
 
     let dir = match &options.app_dir {
         Some(d) => d.clone(),
@@ -308,13 +319,78 @@ pub fn install(options: &InstallOptions) -> Result<Installed> {
     };
     std::fs::create_dir_all(&dir).with_context(|| format!("can't create {}", dir.display()))?;
     let app = dir.join(format!("{APP_NAME}.app"));
+    // Leave another program's Folio.app completely alone, Launch Services
+    // registration included.
+    if app.exists() && !is_ours(&app) {
+        bail!(
+            "{} belongs to another app, so folio won't replace it. Rename or move that app, \
+             or install somewhere else with --app-dir DIR.",
+            app.display()
+        );
+    }
+
+    // Note the default before anything changes, to tell afterwards whether
+    // registering made Folio the default (macOS has been seen to do that).
+    let probe = probe_file("md")?;
+    let before = default_app(&probe).unwrap_or_default();
+
+    let staged = dir.join(format!(".{APP_NAME}-{}.app", std::process::id()));
+    let _ = std::fs::remove_dir_all(&staged);
+    if let Err(e) = build_app(&staged, &folio, terminal) {
+        let _ = make_writable(&staged);
+        let _ = std::fs::remove_dir_all(&staged);
+        return Err(e);
+    }
     if app.exists() {
+        // lsregister -u can print an error about Spotlight yet still unregister.
         let _ = run_tool(LSREGISTER, &["-u".as_ref(), app.as_os_str()]);
         remove_app(&app)?;
     }
+    std::fs::rename(&staged, &app).with_context(|| format!("can't move the new app to {}", app.display()))?;
+    run_tool(LSREGISTER, &["-f".as_ref(), app.as_os_str()])?;
 
+    let after = default_app(&probe).unwrap_or_default();
+    let is_default = after.ends_with(BUNDLE_ID);
+    if is_default && !before.ends_with(BUNDLE_ID) {
+        notes.push("macOS made Folio the default app for Markdown when it was registered.".into());
+    }
+    Ok(Installed { app, folio, terminal, is_default, notes })
+}
+
+/// Check that `terminal` is installed and can be used; fall back to
+/// Terminal.app when it is too old.
+fn choose_terminal(terminal: Terminal, notes: &mut Vec<String>) -> Result<Terminal> {
+    let (_, version) = find_app(terminal.bundle_id())
+        .with_context(|| format!("{} isn't installed; choose another with --terminal", terminal.app_name()))?;
+    if let Some(need) = terminal.min_version() {
+        match parse_version(&version) {
+            Some(_) if !version_at_least(&version, need) => {
+                notes.push(format!(
+                    "{} {version} can't start a command from Finder (it needs {need}), so files open in \
+                     Terminal. Run --install-finder again after updating it.",
+                    terminal.app_name()
+                ));
+                return Ok(Terminal::Terminal);
+            }
+            Some(_) => {}
+            // Development builds report a commit instead of a version.
+            None => notes.push(format!(
+                "Couldn't read {}'s version ({version:?}); it needs {need} or later. If files don't open, \
+                 run --install-finder --terminal terminal.",
+                terminal.app_name()
+            )),
+        }
+    }
+    if terminal == Terminal::ITerm {
+        notes.push("iTerm2 asks before running each file; you can tell it not to ask again.".into());
+    }
+    Ok(terminal)
+}
+
+/// Compile and configure the applet at `app`, then sign and verify it.
+fn build_app(app: &Path, folio: &Path, terminal: Terminal) -> Result<()> {
     let source = user_temp_dir().join(format!("folio-applet-{}.applescript", std::process::id()));
-    std::fs::write(&source, applet_source(&folio, terminal))
+    std::fs::write(&source, applet_source(folio, terminal))
         .with_context(|| format!("can't write {}", source.display()))?;
     let compiled = run_tool("/usr/bin/osacompile", &["-o".as_ref(), app.as_os_str(), source.as_os_str()]);
     let _ = std::fs::remove_file(&source);
@@ -341,38 +417,45 @@ pub fn install(options: &InstallOptions) -> Result<Installed> {
     }
 
     // Editing Info.plist breaks the applet's signature, and macOS won't run
-    // an app with a broken one, so sign it again (ad hoc). The script must
-    // be read-only first, and stray file attributes stop codesign.
+    // an app with a broken one, so sign it again (ad hoc). Stray file
+    // attributes can stop codesign, so clear them first; whether that worked
+    // is up to codesign --verify. The script must be read-only.
+    let _ = run_tool("/usr/bin/xattr", &["-cr".as_ref(), app.as_os_str()]);
     let script = app.join("Contents/Resources/Scripts/main.scpt");
     if let Ok(meta) = std::fs::metadata(&script) {
         let mut perms = meta.permissions();
         perms.set_readonly(true);
         let _ = std::fs::set_permissions(&script, perms);
     }
-    run_tool("/usr/bin/xattr", &["-cr".as_ref(), app.as_os_str()])?;
-    run_tool("/usr/bin/codesign", &["--force".as_ref(), "--sign".as_ref(), "-".as_ref(), app.as_os_str()])?;
-    run_tool("/usr/bin/codesign", &["--verify".as_ref(), "--strict".as_ref(), app.as_os_str()])?;
+    let hint = "if this keeps happening, install Apple's command line tools: xcode-select --install";
+    run_tool("/usr/bin/codesign", &["--force".as_ref(), "--sign".as_ref(), "-".as_ref(), app.as_os_str()])
+        .context(hint)?;
+    run_tool("/usr/bin/codesign", &["--verify".as_ref(), "--strict".as_ref(), app.as_os_str()]).context(hint)?;
+    Ok(())
+}
 
-    // Register, watching whether that alone changed the default app: macOS
-    // has been seen to make a newly registered viewer the default.
-    let probe = probe_file()?;
-    let before = default_app(&probe).unwrap_or_default();
-    run_tool(LSREGISTER, &["-f".as_ref(), app.as_os_str()])?;
-    let after = default_app(&probe).unwrap_or_default();
-    if !options.make_default && after.ends_with(BUNDLE_ID) && !before.ends_with(BUNDLE_ID) {
-        notes.push("macOS made Folio the default app for Markdown when it was registered.".into());
+/// Ask macOS to make Folio the default app for Markdown. From macOS 26.4
+/// it asks the user first. `.md` and `.markdown` can have different types
+/// before macOS 27, so each is set unless it already follows.
+pub fn make_default(app: &Path) -> Result<()> {
+    check_macos()?;
+    for ext in ["md", "markdown"] {
+        let probe = probe_file(ext)?;
+        if default_app(&probe).is_ok_and(|d| d.ends_with(BUNDLE_ID)) {
+            continue;
+        }
+        set_default_app(&probe, app).with_context(|| format!("for .{ext} files"))?;
     }
-
-    let default = options.make_default.then(|| set_default_app(&probe, &app).map_err(|e| format!("{e:#}")));
-    Ok(Installed { app, folio, terminal, default, notes })
+    Ok(())
 }
 
 pub struct Uninstalled {
+    /// The app removed, if any.
     pub app: Option<PathBuf>,
     pub notes: Vec<String>,
 }
 
-/// Unregister and delete Folio.app.
+/// Unregister and delete Folio.app, if folio built it.
 pub fn uninstall(app_dir: Option<&Path>) -> Result<Uninstalled> {
     check_macos()?;
     let dir = match app_dir {
@@ -384,7 +467,11 @@ pub fn uninstall(app_dir: Option<&Path>) -> Result<Uninstalled> {
     if !app.exists() {
         return Ok(Uninstalled { app: None, notes });
     }
-    if let Ok(probe) = probe_file()
+    if !is_ours(&app) {
+        notes.push(format!("{} belongs to another app; left it alone.", app.display()));
+        return Ok(Uninstalled { app: None, notes });
+    }
+    if let Ok(probe) = probe_file("md")
         && default_app(&probe).is_ok_and(|d| d.ends_with(BUNDLE_ID))
     {
         notes.push(
@@ -397,7 +484,9 @@ pub fn uninstall(app_dir: Option<&Path>) -> Result<Uninstalled> {
     let _ = run_tool(LSREGISTER, &["-u".as_ref(), app.as_os_str()]);
     remove_app(&app)?;
     let temp = user_temp_dir();
-    let _ = std::fs::remove_file(temp.join("folio-probe.md"));
+    for ext in ["md", "markdown"] {
+        let _ = std::fs::remove_file(temp.join(format!("folio-probe.{ext}")));
+    }
     clean_command_files(&temp, std::time::Duration::ZERO);
     Ok(Uninstalled { app: Some(app), notes })
 }
@@ -414,21 +503,30 @@ fn check_macos() -> Result<()> {
     Ok(())
 }
 
-/// Delete an existing Folio.app, but only if it is the one folio built.
+/// Whether the app at `app` is the one folio builds.
+fn is_ours(app: &Path) -> bool {
+    plist_value(&app.join("Contents/Info.plist"), "CFBundleIdentifier").is_ok_and(|id| id == BUNDLE_ID)
+}
+
+/// Delete Folio.app, but only if folio built it.
 fn remove_app(app: &Path) -> Result<()> {
-    let id = plist_value(&app.join("Contents/Info.plist"), "CFBundleIdentifier").ok();
-    if id.as_deref() != Some(BUNDLE_ID) {
-        bail!("{} exists and wasn't made by folio; not replacing it", app.display());
+    if !is_ours(app) {
+        bail!("{} belongs to another app; not removing it", app.display());
     }
-    // The script was made read-only for signing; let it be deleted.
+    make_writable(app)?;
+    std::fs::remove_dir_all(app).with_context(|| format!("can't remove {}", app.display()))
+}
+
+/// The script was made read-only for signing; let the bundle be deleted.
+fn make_writable(app: &Path) -> Result<()> {
     let script = app.join("Contents/Resources/Scripts/main.scpt");
     if let Ok(meta) = std::fs::metadata(&script) {
         let mut perms = meta.permissions();
         #[allow(clippy::permissions_set_readonly_false)]
         perms.set_readonly(false);
-        let _ = std::fs::set_permissions(&script, perms);
+        std::fs::set_permissions(&script, perms)?;
     }
-    std::fs::remove_dir_all(app).with_context(|| format!("can't remove {}", app.display()))
+    Ok(())
 }
 
 fn plist_value(plist: &Path, key: &str) -> Result<String> {
@@ -476,15 +574,15 @@ fn default_app(file: &Path) -> Result<String> {
 }
 
 fn set_default_app(probe: &Path, app: &Path) -> Result<()> {
-    match helper(&["set".as_ref(), probe.as_os_str(), app.as_os_str(), "120".as_ref()])?.as_str() {
+    match helper(&["set".as_ref(), probe.as_os_str(), app.as_os_str(), "60".as_ref()])?.as_str() {
         "ok" => Ok(()),
         _ => bail!("macOS kept the current app (you chose Keep, or didn't answer)"),
     }
 }
 
 /// A Markdown file to ask Launch Services about.
-fn probe_file() -> Result<PathBuf> {
-    let probe = user_temp_dir().join("folio-probe.md");
+fn probe_file(ext: &str) -> Result<PathBuf> {
+    let probe = user_temp_dir().join(format!("folio-probe.{ext}"));
     std::fs::write(&probe, "# folio\n").with_context(|| format!("can't write {}", probe.display()))?;
     Ok(probe)
 }
@@ -641,7 +739,23 @@ mod tests {
     #[test]
     fn command_script_runs_folio_and_cleans_up() {
         let script = command_script(&["/opt/homebrew/bin/folio".into(), "/Users/ann/Notes/It's Q3.md".into()]);
-        assert_eq!(script, "#!/bin/sh\nrm -f \"$0\"\nexec '/opt/homebrew/bin/folio' '/Users/ann/Notes/It'\\''s Q3.md'\n");
+        assert_eq!(
+            script,
+            "#!/bin/sh\nrm -f \"$0\"\n'/opt/homebrew/bin/folio' '/Users/ann/Notes/It'\\''s Q3.md' || \
+             { s=$?; printf '\\nfolio exited with status %s. Press Return to close.' \"$s\"; read _; }\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hold_wrapper_passes_arguments_through_untouched() {
+        let odd = ["it's \"odd\"", "$HOME `id`", "--paging", "line\nbreak"];
+        let out = Command::new("/bin/sh").args(["-c", HOLD_ON_FAILURE, "printf"]).arg("%s|").args(odd).output().unwrap();
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stdout), odd.map(|a| format!("{a}|")).concat());
+        // On failure it says so, then waits for Return (stdin is empty here).
+        let out = Command::new("/bin/sh").args(["-c", HOLD_ON_FAILURE, "false"]).stdin(Stdio::null()).output().unwrap();
+        assert!(String::from_utf8_lossy(&out.stdout).contains("folio exited with status 1"));
     }
 
     #[test]
@@ -673,7 +787,8 @@ mod tests {
             Launch::Open(args) => args,
             other => panic!("{other:?}"),
         };
-        let tail = ["/opt/homebrew/bin/folio", "--paging", "always", "/Users/ann/My Notes/a b.md"];
+        let tail =
+            ["/bin/sh", "-c", HOLD_ON_FAILURE, "/opt/homebrew/bin/folio", "--paging", "always", "/Users/ann/My Notes/a b.md"];
         let with = |head: &[&str]| head.iter().chain(tail.iter()).map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(open(Terminal::Ghostty), with(&["-n", "-b", "com.mitchellh.ghostty", "--args", "-e"]));
         assert_eq!(open(Terminal::Alacritty), with(&["-n", "-b", "org.alacritty", "--args", "-e"]));
@@ -686,7 +801,7 @@ mod tests {
             match launch_plan(t, folio, Some(file)) {
                 Launch::CommandFile { bundle_id, script } => {
                     assert_eq!(bundle_id, t.bundle_id());
-                    assert!(script.ends_with("exec '/opt/homebrew/bin/folio' '--paging' 'always' '/Users/ann/My Notes/a b.md'\n"));
+                    assert!(script.contains("\n'/opt/homebrew/bin/folio' '--paging' 'always' '/Users/ann/My Notes/a b.md' || {"));
                 }
                 other => panic!("{other:?}"),
             }
@@ -723,6 +838,22 @@ mod tests {
         assert_eq!(stored_folio_path(cellar, &|_: &Path| false), cellar.to_path_buf());
         let cargo = Path::new("/Users/me/.cargo/bin/folio");
         assert_eq!(stored_folio_path(cargo, &|_: &Path| true), cargo.to_path_buf());
+    }
+
+    #[test]
+    fn parses_only_real_versions() {
+        assert_eq!(parse_version("1.4.0"), Some(vec![1, 4, 0]));
+        assert_eq!(parse_version("1.4.0-tip+abc"), Some(vec![1, 4, 0]));
+        assert_eq!(parse_version("a1b2c3d"), None);
+        assert_eq!(parse_version("1234567"), None);
+        assert_eq!(parse_version(""), None);
+    }
+
+    #[test]
+    fn opening_the_app_itself_asks_for_a_file() {
+        let src = applet_source(Path::new("/opt/folio"), Terminal::Terminal);
+        let run = &src[src.find("on run").unwrap()..src.find("end run").unwrap()];
+        assert!(run.contains("choose file") && !run.contains("home folder"));
     }
 
     #[test]

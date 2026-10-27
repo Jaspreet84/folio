@@ -73,16 +73,18 @@ folio --uninstall-finder
 ```
 
 This builds a small app, `~/Applications/Folio.app`, using tools that come
-with macOS. Right-click a Markdown file and choose **Open With > Folio**, and
-it opens in folio in a new terminal window. Opening Folio itself shows the
-file picker for your home folder.
+with macOS (`--app-dir DIR` puts it somewhere else). Right-click a Markdown
+file and choose **Open With > Folio**, and it opens in folio in a new
+terminal window. Opening Folio itself asks you to choose a file. If folio
+can't start, the window stays open to show why.
 
 - **Terminals:** Terminal, iTerm2, Ghostty (1.4 or later), kitty, WezTerm
   and Alacritty. iTerm2 asks before running each file until you tell it not
   to.
 - **Double-click:** `--make-default` asks macOS to make Folio the default
-  app for Markdown. macOS 26.4 and later ask you to confirm. You can also do
-  it by hand: Get Info on a `.md` file, choose Folio under Open with, then
+  app for `.md` and `.markdown` files. macOS 26.4 and later ask you to
+  confirm, and the dialog can open behind other windows. You can also do it
+  by hand: Get Info on a `.md` file, choose Folio under Open with, then
   Change All.
 - **Moving folio:** the app remembers where folio is, so run
   `--install-finder` again if you move or reinstall it. Homebrew upgrades

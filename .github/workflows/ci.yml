@@ -123,20 +123,34 @@ jobs:
           [ "$got" = "$want" ] || { [ -z "$got" ] && [ "$want" = "-" ]; }
           "$LSREGISTER" -dump > "$RUNNER_TEMP/ls-dump.txt"; grep -c -F "$BUNDLE_ID" "$RUNNER_TEMP/ls-dump.txt"
 
-      - name: Open With launches folio in a new Terminal window
+      - name: Control check, apps can be launched on this runner
+        # If even Calculator doesn't start, a failure in the next step is
+        # the runner's, not folio's.
         timeout-minutes: 4
+        run: |
+          start=$SECONDS
+          open -a Calculator
+          until pgrep -x Calculator > /dev/null; do
+            (( SECONDS - start < 180 )) || { echo "::error::Calculator did not start: this runner can't launch apps"; exit 1; }
+            sleep 2; done
+          echo "Calculator started after $((SECONDS - start)) s"
+          pkill -x Calculator || true
+
+      - name: Open With launches folio in a new Terminal window
+        timeout-minutes: 8
         run: |
           LOG="$HOME/Library/Logs/folio-finder.log"; rm -f "$LOG"
           q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
-          WANT="exec $(q "$FOLIO") '--paging' 'always' $(q "$MD")"
+          WANT="$(q "$FOLIO") '--paging' 'always' $(q "$MD") ||"
+          start=$SECONDS
           open -a "$APP" "$MD"
-          deadline=$((SECONDS + 90))
+          deadline=$((SECONDS + 180))
           until grep -qF -- "$WANT" "$LOG" 2>/dev/null; do
             (( SECONDS < deadline )) || { echo "::error::Folio.app did not log the launch"; cat "$LOG" 2>/dev/null; exit 1; }
             sleep 2; done
-          cat "$LOG"
+          cat "$LOG"; echo "applet ran folio after $((SECONDS - start)) s"
           grep -F -- "$WANT" "$LOG" > "$RUNNER_TEMP/hit.txt"; grep -q -- '-> ok$' "$RUNNER_TEMP/hit.txt"
-          deadline=$((SECONDS + 60)); pid=""
+          deadline=$((SECONDS + 180)); pid=""
           until [ -n "$pid" ]; do
             pid=$(pgrep -n -f folio-ci-sample || true)
             [ -n "$pid" ] || { (( SECONDS < deadline )) || { echo "::error::no folio process"; exit 1; }; sleep 2; }
@@ -145,19 +159,27 @@ jobs:
           chain=""; p="$pid"
           while [ -n "$p" ] && [ "$p" -gt 1 ]; do chain="$chain < $(ps -o comm= -p "$p" || true)"; p=$(ps -o ppid= -p "$p" | tr -d ' ' || true); done
           echo "chain:$chain"; grep -q Terminal <<<"$chain"
+          echo "folio running in Terminal after $((SECONDS - start)) s"
           pkill -f folio-ci-sample || true
 
-      - name: Reinstall over the existing app
+      - name: Reinstall over the existing app, refuse a foreign one
         run: |
           "$FOLIO" --install-finder --terminal terminal --app-dir "$RUNNER_TEMP/apps"
           codesign --verify --strict "$APP"
+          ls -a "$RUNNER_TEMP/apps"; if ls -a "$RUNNER_TEMP/apps" | grep -q '^\.Folio-'; then echo "::error::staging copy left behind"; exit 1; fi
+          # Another program's Folio.app must be left alone, registration included.
+          mkdir -p "$RUNNER_TEMP/other"; cp -R /System/Applications/Calculator.app "$RUNNER_TEMP/other/Folio.app"
+          if "$FOLIO" --install-finder --terminal terminal --app-dir "$RUNNER_TEMP/other"; then echo "::error::replaced a foreign Folio.app"; exit 1; fi
+          "$FOLIO" --uninstall-finder --app-dir "$RUNNER_TEMP/other" | grep -q "belongs to another app"
+          test "$(plutil -extract CFBundleIdentifier raw -o - "$RUNNER_TEMP/other/Folio.app/Contents/Info.plist")" = com.apple.calculator
 
       - name: Make default and double-click (macOS 15 only; 26.4+ asks the user)
         if: startsWith(matrix.os, 'macos-15')
         continue-on-error: true
         timeout-minutes: 5
         run: |
-          test "$(osascript -l JavaScript src/finder-helper.js set "$MD" "$APP" 60)" = ok
+          "$FOLIO" --install-finder --terminal terminal --app-dir "$RUNNER_TEMP/apps" --make-default | tee "$RUNNER_TEMP/make-default.txt"
+          grep -q "Done: double-clicking" "$RUNNER_TEMP/make-default.txt"
           "$RUNNER_TEMP/lsquery" "$MD" "$BUNDLE_ID" > "$RUNNER_TEMP/default.txt"; grep -qxF "default=$APP" "$RUNNER_TEMP/default.txt"
           LOG="$HOME/Library/Logs/folio-finder.log"; before=$(wc -l < "$LOG")
           open "$MD"
@@ -178,6 +200,12 @@ jobs:
         run: |
           screencapture -x "$RUNNER_TEMP/screen.png" || true
           cp "$HOME/Library/Logs/folio-finder.log" "$RUNNER_TEMP/" 2>/dev/null || true
+          # Is Terminal running? Did it run the .command file (which deletes itself)?
+          { pgrep -lf Terminal || echo "Terminal not running"; } > "$RUNNER_TEMP/terminal-ps.txt"
+          ls -la "$(getconf DARWIN_USER_TEMP_DIR)" | grep folio- > "$RUNNER_TEMP/command-files.txt" || echo "no folio files left" > "$RUNNER_TEMP/command-files.txt"
+          log show --last 10m --style compact \
+            --predicate 'process == "Terminal" OR process == "open" OR subsystem == "com.apple.launchservices"' \
+            2>/dev/null | tail -400 > "$RUNNER_TEMP/terminal-log.txt" || true
           grep -n -B2 -A30 "$BUNDLE_ID" "$RUNNER_TEMP/ls-dump.txt" > "$RUNNER_TEMP/ls-folio.txt" 2>/dev/null || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
