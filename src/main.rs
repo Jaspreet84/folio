@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, ValueEnum};
 
+use folio::finder::{self, Terminal};
 use folio::highlight::Highlighter;
 use folio::pager::{Options, Page, Pager, Start};
 use folio::theme::{self, Depth, Theme};
@@ -50,6 +51,33 @@ struct Args {
     /// Don't reload the document when its file changes.
     #[arg(long)]
     no_watch: bool,
+
+    /// Add Folio to Finder's "Open With" menu for Markdown files, so they
+    /// open in folio in a new terminal window (macOS).
+    #[arg(long, help_heading = "Finder (macOS)", conflicts_with = "uninstall_finder")]
+    install_finder: bool,
+
+    /// Remove Folio from Finder (macOS).
+    #[arg(long, help_heading = "Finder (macOS)")]
+    uninstall_finder: bool,
+
+    /// The terminal Finder opens files in (default: the one you run
+    /// --install-finder from).
+    #[arg(long, value_enum, value_name = "NAME", help_heading = "Finder (macOS)")]
+    terminal: Option<Terminal>,
+
+    /// With --install-finder: also make Folio the default app for Markdown,
+    /// so double-clicking a file opens it.
+    #[arg(long, requires = "install_finder", help_heading = "Finder (macOS)")]
+    make_default: bool,
+
+    /// Where to put Folio.app (default ~/Applications).
+    #[arg(long, value_name = "DIR", hide = true)]
+    app_dir: Option<PathBuf>,
+
+    /// Used by Folio.app: open FILE in folio in a new terminal window.
+    #[arg(long, hide = true)]
+    launch_terminal: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -78,6 +106,23 @@ fn main() -> ExitCode {
 
 fn run() -> Result<()> {
     let args = Args::parse();
+    if args.launch_terminal {
+        return finder::launch_terminal(args.terminal.unwrap_or(Terminal::Terminal), args.file.as_deref());
+    }
+    if args.install_finder {
+        return install_finder(&args);
+    }
+    if args.uninstall_finder {
+        let done = finder::uninstall(args.app_dir.as_deref())?;
+        match done.app {
+            Some(app) => println!("Removed {}.", app.display()),
+            None => println!("Folio.app isn't installed."),
+        }
+        for note in done.notes {
+            println!("{note}");
+        }
+        return Ok(());
+    }
     // Nothing to read: no file and nothing piped in. Show how to use folio
     // instead of waiting on the keyboard or scanning the current folder.
     if args.file.is_none() && io::stdin().is_terminal() {
@@ -167,6 +212,33 @@ fn run() -> Result<()> {
         let rendered = layout::layout(page.document(), width, &theme, &mut hl);
         print(&rendered, color, &theme, page.dir())
     }
+}
+
+fn install_finder(args: &Args) -> Result<()> {
+    let terminal = args.terminal.unwrap_or_else(|| Terminal::detect(&|k: &str| std::env::var(k).ok()));
+    let options = finder::InstallOptions { app_dir: args.app_dir.clone(), terminal, make_default: args.make_default };
+    let done = finder::install(&options)?;
+    println!("Installed {}", done.app.display());
+    println!("  Opens files in {} with {}.", done.terminal.app_name(), done.folio.display());
+    for note in &done.notes {
+        println!("  {note}");
+    }
+    println!();
+    println!("In Finder, right-click a Markdown file and choose Open With > Folio.");
+    match done.default {
+        Some(Ok(())) => println!("Folio is now the default app for Markdown, so double-clicking opens it."),
+        Some(Err(e)) => {
+            println!("Couldn't make Folio the default app ({e}).");
+            println!("To do it by hand: Get Info on a .md file, choose Folio under Open with, then Change All.");
+        }
+        None => {
+            println!("To open Markdown files with a double-click, run this again with --make-default,");
+            println!("or use Get Info on a .md file: choose Folio under Open with, then Change All.");
+        }
+    }
+    println!();
+    println!("If you move folio, run --install-finder again. Remove it with --uninstall-finder.");
+    Ok(())
 }
 
 fn run_pager(start: Start, theme: Theme, hl: Highlighter, options: Options) -> Result<()> {

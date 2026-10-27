@@ -1,0 +1,192 @@
+name: CI
+
+on:
+  push:
+    branches: [master, finder]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: cargo test --locked
+
+  finder:
+    # Builds folio on a real Mac, runs the tests, installs Folio.app, and
+    # checks that opening a .md file with it (as Finder's Open With does)
+    # starts folio on that file in a new Terminal window.
+    name: Finder (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, macos-26, macos-26-intel, xcode-27] # xcode-27 = macOS 27, arm64
+    defaults:
+      run:
+        shell: bash
+    env:
+      BUNDLE_ID: io.github.jaspreet84.folio
+      LSREGISTER: /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Describe the runner
+        run: |
+          sw_vers; echo "arch=$(uname -m) user=$(id -un)"
+          echo "session: $(launchctl managername || true)"; csrutil status || true; xcode-select -p || true
+          for t in osacompile osadecompile plutil codesign xattr open getconf osascript swiftc; do
+            printf '%-13s %s\n' "$t" "$(command -v "$t" || echo MISSING)"; done
+          ls -l "$LSREGISTER"
+          command -v cargo || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal; echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"; }
+
+      - name: Build and test
+        run: |
+          cargo build --release --locked
+          cargo test --release --locked
+          echo "FOLIO=$(cd target/release && pwd -P)/folio" >> "$GITHUB_ENV"
+          echo "APP=$RUNNER_TEMP/apps/Folio.app" >> "$GITHUB_ENV"
+
+      - name: Query tool, sample file, state before install
+        run: |
+          cat > "$RUNNER_TEMP/lsquery.swift" <<'EOF'
+          import AppKit
+          import UniformTypeIdentifiers
+          let file = URL(fileURLWithPath: CommandLine.arguments[1])
+          let ws = NSWorkspace.shared
+          print("uti=\((try? file.resourceValues(forKeys: [.contentTypeKey]))?.contentType?.identifier ?? "-")")
+          print("default=\(ws.urlForApplication(toOpen: file)?.path ?? "-")")
+          for a in ws.urlsForApplications(toOpen: file) { print("can-open=\(a.path)") }
+          for a in ws.urlsForApplications(withBundleIdentifier: CommandLine.arguments[2]) { print("bundle=\(a.path)") }
+          for e in ["md", "markdown", "mdown", "mkd", "mkdn", "mdwn"] { print("ext.\(e)=\(UTType(filenameExtension: e)?.identifier ?? "-")") }
+          EOF
+          swiftc -O -o "$RUNNER_TEMP/lsquery" "$RUNNER_TEMP/lsquery.swift"
+          mkdir -p "$RUNNER_TEMP/md files"
+          MD="$RUNNER_TEMP/md files/folio-ci-sample it's.md"
+          printf '# Folio CI\n\nOpened from Finder.\n' > "$MD"; echo "MD=$MD" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/lsquery" "$MD" "$BUNDLE_ID" | tee "$RUNNER_TEMP/before.txt"
+
+      - name: Install Folio.app
+        run: |
+          "$FOLIO" --install-finder --terminal terminal --app-dir "$RUNNER_TEMP/apps"
+          find "$APP" | sort
+
+      - name: Check the bundle
+        run: |
+          PL="$APP/Contents/Info.plist"
+          plutil -lint "$PL"; plutil -p "$PL" > "$RUNNER_TEMP/plist.txt"; cat "$RUNNER_TEMP/plist.txt"
+          x() { plutil -extract "$1" raw -o - "$PL"; }
+          test "$(x CFBundleIdentifier)" = "$BUNDLE_ID"
+          EXE="$(x CFBundleExecutable)"; echo "CFBundleExecutable=$EXE"; test -x "$APP/Contents/MacOS/$EXE"
+          test "$(x CFBundleDocumentTypes.0.LSItemContentTypes.0)" = net.daringfireball.markdown
+          test "$(x CFBundleDocumentTypes.0.CFBundleTypeRole)" = Viewer
+          test "$(x CFBundleDocumentTypes.0.LSHandlerRank)" = Alternate
+          test "$(x CFBundleDocumentTypes.1.CFBundleTypeExtensions.0)" = md
+          test "$(x LSUIElement)" = true
+          if grep -qE '"\*"|"\*\*\*\*"' "$RUNNER_TEMP/plist.txt"; then echo "::error::catch-all document type left"; exit 1; fi
+          test ! -w "$APP/Contents/Resources/Scripts/main.scpt"
+          xattr -lr "$APP" || true
+          osadecompile "$APP/Contents/Resources/Scripts/main.scpt" > "$RUNNER_TEMP/applet.applescript"
+          cat "$RUNNER_TEMP/applet.applescript"
+          grep -qF -- "$FOLIO" "$RUNNER_TEMP/applet.applescript"
+          if grep -qE '^[[:space:]]*property ' "$RUNNER_TEMP/applet.applescript"; then echo "::error::applet uses properties"; exit 1; fi
+          codesign --verify --strict --verbose=2 "$APP"
+          codesign -dv "$APP" > "$RUNNER_TEMP/codesign.txt" 2>&1; cat "$RUNNER_TEMP/codesign.txt"
+          grep -qi adhoc "$RUNNER_TEMP/codesign.txt"
+
+      - name: Registered and offered under Open With
+        run: |
+          "$RUNNER_TEMP/lsquery" "$MD" "$BUNDLE_ID" > "$RUNNER_TEMP/after.txt"; cat "$RUNNER_TEMP/after.txt"
+          grep -qxF "bundle=$APP" "$RUNNER_TEMP/after.txt"
+          grep -qxF "can-open=$APP" "$RUNNER_TEMP/after.txt"
+          if [ "$(grep '^default=' "$RUNNER_TEMP/before.txt")" != "$(grep '^default=' "$RUNNER_TEMP/after.txt")" ]; then
+            echo "::warning::registering Folio changed the default app for .md"; fi
+          got="$(osascript -l JavaScript src/finder-helper.js get "$MD" | cut -f1)"
+          want="$(sed -n 's/^default=//p' "$RUNNER_TEMP/after.txt")"
+          echo "helper=[$got] swift=[$want]"
+          [ "$got" = "$want" ] || { [ -z "$got" ] && [ "$want" = "-" ]; }
+          "$LSREGISTER" -dump > "$RUNNER_TEMP/ls-dump.txt"; grep -c -F "$BUNDLE_ID" "$RUNNER_TEMP/ls-dump.txt"
+
+      - name: Open With launches folio in a new Terminal window
+        timeout-minutes: 4
+        run: |
+          LOG="$HOME/Library/Logs/folio-finder.log"; rm -f "$LOG"
+          q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+          WANT="exec $(q "$FOLIO") $(q "$MD")"
+          open -a "$APP" "$MD"
+          deadline=$((SECONDS + 90))
+          until grep -qF -- "$WANT" "$LOG" 2>/dev/null; do
+            (( SECONDS < deadline )) || { echo "::error::Folio.app did not log the launch"; cat "$LOG" 2>/dev/null; exit 1; }
+            sleep 2; done
+          cat "$LOG"
+          grep -F -- "$WANT" "$LOG" > "$RUNNER_TEMP/hit.txt"; grep -q -- '-> ok$' "$RUNNER_TEMP/hit.txt"
+          deadline=$((SECONDS + 60)); pid=""
+          until [ -n "$pid" ]; do
+            pid=$(pgrep -n -f folio-ci-sample || true)
+            [ -n "$pid" ] || { (( SECONDS < deadline )) || { echo "::error::no folio process"; exit 1; }; sleep 2; }
+          done
+          ps -o command= -p "$pid" | tee "$RUNNER_TEMP/folio-process.txt" | grep -qF -- "$FOLIO"
+          chain=""; p="$pid"
+          while [ -n "$p" ] && [ "$p" -gt 1 ]; do chain="$chain < $(ps -o comm= -p "$p" || true)"; p=$(ps -o ppid= -p "$p" | tr -d ' ' || true); done
+          echo "chain:$chain"; grep -q Terminal <<<"$chain"
+          pkill -f folio-ci-sample || true
+
+      - name: Reinstall over the existing app
+        run: |
+          "$FOLIO" --install-finder --terminal terminal --app-dir "$RUNNER_TEMP/apps"
+          codesign --verify --strict "$APP"
+
+      - name: Make default and double-click (macOS 15 only; 26.4+ asks the user)
+        if: startsWith(matrix.os, 'macos-15')
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          test "$(osascript -l JavaScript src/finder-helper.js set "$MD" "$APP" 60)" = ok
+          "$RUNNER_TEMP/lsquery" "$MD" "$BUNDLE_ID" > "$RUNNER_TEMP/default.txt"; grep -qxF "default=$APP" "$RUNNER_TEMP/default.txt"
+          LOG="$HOME/Library/Logs/folio-finder.log"; before=$(wc -l < "$LOG")
+          open "$MD"
+          deadline=$((SECONDS + 60))
+          until [ "$(wc -l < "$LOG")" -gt "$before" ]; do
+            (( SECONDS < deadline )) || { echo "::error::double-click did not reach Folio.app"; exit 1; }; sleep 2; done
+          tail -n 1 "$LOG"; pkill -f folio-ci-sample || true
+
+      - name: Uninstall
+        run: |
+          "$FOLIO" --uninstall-finder --app-dir "$RUNNER_TEMP/apps"
+          test ! -e "$APP"
+          "$RUNNER_TEMP/lsquery" "$MD" "$BUNDLE_ID" > "$RUNNER_TEMP/removed.txt"; cat "$RUNNER_TEMP/removed.txt"
+          if grep -q '^bundle=' "$RUNNER_TEMP/removed.txt"; then echo "::warning::Launch Services still lists Folio"; fi
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          screencapture -x "$RUNNER_TEMP/screen.png" || true
+          cp "$HOME/Library/Logs/folio-finder.log" "$RUNNER_TEMP/" 2>/dev/null || true
+          grep -n -B2 -A30 "$BUNDLE_ID" "$RUNNER_TEMP/ls-dump.txt" > "$RUNNER_TEMP/ls-folio.txt" 2>/dev/null || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: finder-diagnostics-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/*.png
+            ${{ runner.temp }}/*.txt
+            ${{ runner.temp }}/*.log
+            ${{ runner.temp }}/applet.applescript
+          if-no-files-found: ignore
+          retention-days: 7
