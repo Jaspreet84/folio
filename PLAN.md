@@ -287,6 +287,61 @@ Known gaps:
   `set-clipboard on`. On a local Mac, `pbcopy` is used instead.
 - Not checked on a real Mac.
 
+## Opening files from Finder (macOS, 2026-10-27)
+
+Finder can only hand files to an app, so `folio --install-finder` builds
+one on the user's Mac: `~/Applications/Folio.app`, an AppleScript applet
+made with `osacompile`. It declares that it can view Markdown, so Finder
+offers it under Open With, and double-click works once it is the default
+app. The applet runs `folio --launch-terminal --terminal NAME FILE`, which
+opens a new terminal window running `folio --paging always FILE` and
+returns at once. The pager is forced because a short document would
+otherwise be printed and folio would exit, and some terminals close the
+window when it does (the first CI run caught this).
+
+How it's built (code in `src/finder.rs`, `src/finder-helper.js`):
+
+- **File types.** Two `CFBundleDocumentTypes` entries, role Viewer and rank
+  Alternate: one for the `net.daringfireball.markdown` type, one for the
+  extensions. Markdown is a system type only from macOS 27; before that a
+  `.md` file's type depends on which apps are installed. The whole list
+  is replaced, because `osacompile` can add a catch-all entry.
+- **Bundle.** A bundle id (`io.github.jaspreet84.folio`), folio's version,
+  and `LSUIElement` (no Dock icon). The applet's values are literals, not
+  `property` variables, which a signed applet can't save.
+- **Signing.** Editing `Info.plist` breaks the applet's signature, and macOS
+  won't launch it, so folio makes the script read-only, clears extended
+  attributes, signs ad hoc and verifies the signature. Then it registers
+  the app with `lsregister -f`, and notes if that alone changed the
+  default Markdown app (it has been seen to happen).
+- **folio's path** is stored as invoked, not resolved through symlinks.
+  For Homebrew it is the stable `<prefix>/bin/folio`, because the
+  `Cellar/<version>` path disappears on upgrade.
+- **Terminals.** Terminal.app and iTerm2 open a self-deleting `.command`
+  file written to the per-user temporary folder (mode 0700). That avoids
+  asking for permission to control the terminal. Ghostty (1.4.0 or later;
+  older versions fall back to Terminal), kitty, WezTerm and Alacritty are
+  started with `open -n -b <bundle id> --args …`, each path as its own
+  argument. The default terminal is the one the installer runs in,
+  detected from each terminal's own variables first (kitty and Alacritty
+  don't set `TERM_PROGRAM`, and tmux replaces it).
+- **Default app.** `--make-default` calls NSWorkspace through
+  `osascript -l JavaScript`. Up to macOS 26.3 the change is silent; from
+  26.4 macOS asks the user. Without the flag, folio prints the manual
+  steps (Get Info, Open with, Change All).
+- **Uninstall** removes the app only if its bundle id is folio's.
+
+CI (`.github/workflows/ci.yml`) runs the tests on Linux, and on macOS 15,
+26 and 27 (Apple silicon, plus Intel for 15 and 26) it builds Folio.app,
+checks the bundle and signature, checks that Launch Services offers it
+for a `.md` file, opens a file with it as Open With does, and confirms
+folio is running on that file in a new Terminal window. On macOS 15 it
+also makes Folio the default and opens the file as a double-click does.
+
+Still to check by hand on a Mac: real Finder clicks, macOS 13 and 14 (no
+CI runners), a Mac without Xcode tools, the 26.4+ confirmation prompt,
+and terminals other than Terminal.app.
+
 ## Testing
 
 - Snapshot tests of layout output at widths 40, 80 and 120 (`tests/`).

@@ -128,7 +128,7 @@ jobs:
         run: |
           LOG="$HOME/Library/Logs/folio-finder.log"; rm -f "$LOG"
           q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
-          WANT="exec $(q "$FOLIO") $(q "$MD")"
+          WANT="exec $(q "$FOLIO") '--paging' 'always' $(q "$MD")"
           open -a "$APP" "$MD"
           deadline=$((SECONDS + 90))
           until grep -qF -- "$WANT" "$LOG" 2>/dev/null; do

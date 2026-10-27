@@ -63,6 +63,33 @@ Links to other Markdown files open in folio; web links open in your browser.
 Local files that aren't Markdown are never opened, so a document can't make
 you launch a program by accident.
 
+## Open Markdown files from Finder (macOS)
+
+```sh
+folio --install-finder                  # add Folio to Finder's Open With menu
+folio --install-finder --make-default   # also open .md files with a double-click
+folio --install-finder --terminal kitty # choose the terminal (default: the one you're in)
+folio --uninstall-finder
+```
+
+This builds a small app, `~/Applications/Folio.app`, using tools that come
+with macOS. Right-click a Markdown file and choose **Open With > Folio**, and
+it opens in folio in a new terminal window. Opening Folio itself shows the
+file picker for your home folder.
+
+- **Terminals:** Terminal, iTerm2, Ghostty (1.4 or later), kitty, WezTerm
+  and Alacritty. iTerm2 asks before running each file until you tell it not
+  to.
+- **Double-click:** `--make-default` asks macOS to make Folio the default
+  app for Markdown. macOS 26.4 and later ask you to confirm. You can also do
+  it by hand: Get Info on a `.md` file, choose Folio under Open with, then
+  Change All.
+- **Moving folio:** the app remembers where folio is, so run
+  `--install-finder` again if you move or reinstall it. Homebrew upgrades
+  are fine.
+- **Troubleshooting:** each launch is logged to
+  `~/Library/Logs/folio-finder.log`.
+
 ## Where folio keeps things
 
 Reading positions and marks go in `~/.local/state/folio/state.json` on Linux

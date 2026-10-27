@@ -135,9 +135,11 @@ pub enum Launch {
     CommandFile { bundle_id: &'static str, script: String },
 }
 
-/// The launch for `terminal`, running `folio [FILE]`.
+/// The launch for `terminal`, running `folio --paging always [FILE]`. The
+/// pager is forced: a short document would otherwise be printed and folio
+/// would exit, and some terminals close the window when it does.
 pub fn launch_plan(terminal: Terminal, folio: &Path, file: Option<&Path>) -> Launch {
-    let mut command = vec![folio.to_string_lossy().into_owned()];
+    let mut command = vec![folio.to_string_lossy().into_owned(), "--paging".into(), "always".into()];
     command.extend(file.map(|f| f.to_string_lossy().into_owned()));
     let open = |options: &[&str]| {
         let mut args: Vec<String> = ["-n", "-b", terminal.bundle_id(), "--args"].iter().map(|s| s.to_string()).collect();
@@ -671,7 +673,7 @@ mod tests {
             Launch::Open(args) => args,
             other => panic!("{other:?}"),
         };
-        let tail = ["/opt/homebrew/bin/folio", "/Users/ann/My Notes/a b.md"];
+        let tail = ["/opt/homebrew/bin/folio", "--paging", "always", "/Users/ann/My Notes/a b.md"];
         let with = |head: &[&str]| head.iter().chain(tail.iter()).map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(open(Terminal::Ghostty), with(&["-n", "-b", "com.mitchellh.ghostty", "--args", "-e"]));
         assert_eq!(open(Terminal::Alacritty), with(&["-n", "-b", "org.alacritty", "--args", "-e"]));
@@ -684,7 +686,7 @@ mod tests {
             match launch_plan(t, folio, Some(file)) {
                 Launch::CommandFile { bundle_id, script } => {
                     assert_eq!(bundle_id, t.bundle_id());
-                    assert!(script.ends_with("exec '/opt/homebrew/bin/folio' '/Users/ann/My Notes/a b.md'\n"));
+                    assert!(script.ends_with("exec '/opt/homebrew/bin/folio' '--paging' 'always' '/Users/ann/My Notes/a b.md'\n"));
                 }
                 other => panic!("{other:?}"),
             }
