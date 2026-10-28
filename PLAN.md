@@ -353,9 +353,18 @@ for a `.md` file, opens a file with it as Open With does, and confirms
 folio is running on that file in a new Terminal window. On macOS 15 it
 also makes Folio the default and opens the file as a double-click does.
 
-Still to check by hand on a Mac: real Finder clicks, macOS 13 and 14 (no
-CI runners), a Mac without Xcode tools, the 26.4+ confirmation prompt,
-and terminals other than Terminal.app.
+Results (2026-10-27): every check passes on macOS 15 (Apple silicon and
+Intel), macOS 26 (Apple silicon) and macOS 27. **macOS 26 on Intel is
+unverified.** On that runner, opening the newly installed Folio.app, or
+Terminal for its `.command` file, failed at a different point in each of
+three runs: once Terminal never started; twice the applet started but
+never ran folio. Calculator launches there at once, and the same steps
+pass on Intel macOS 15, so the cause is not known. That CI job is allowed
+to fail until someone checks an Intel Mac on macOS 26 by hand.
+
+Still to check by hand on a Mac: real Finder clicks, macOS 26 on Intel,
+macOS 13 and 14 (no CI runners), a Mac without Xcode tools, the 26.4+
+confirmation prompt, and terminals other than Terminal.app.
 
 ## Testing
 

@@ -31,6 +31,11 @@ jobs:
     name: Finder (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    # macOS 26 on Intel is unverified: on that runner, opening the newly
+    # installed Folio.app (or Terminal for its .command file) failed at a
+    # different point in each of three runs, although other apps launch
+    # there. Its result is reported but doesn't fail the build.
+    continue-on-error: ${{ matrix.os == 'macos-26-intel' }}
     strategy:
       fail-fast: false
       matrix:
