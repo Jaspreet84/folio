@@ -672,6 +672,7 @@ dependencies = [
  "ignore",
  "insta",
  "ratatui",
+ "regex",
  "serde",
  "serde_json",
  "syntect",

@@ -1,7 +1,7 @@
 //! The interactive pager: scrolling, headings, contents pane, search, link
 //! and code focus, history, marks, the file picker and live reload.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -18,7 +18,8 @@ use ratatui::{DefaultTerminal, Frame};
 use crate::ansi;
 use crate::doc::{self, Document};
 use crate::highlight::Highlighter;
-use crate::layout::{self, Rendered, TargetKind};
+use crate::diagram::Diagrams;
+use crate::layout::{self, Rendered, Shown, TargetKind};
 use crate::links::{self, LinkAction};
 use crate::picker::{self, Picker, fuzzy_match};
 use crate::search::{self, Match};
@@ -47,9 +48,11 @@ const HELP: &[(&str, &str)] = &[
     ("t", "contents pane"),
     ("Ctrl-P", "jump to a heading by name"),
     ("/  n N", "search, next / previous match"),
-    ("Tab  Shift-Tab", "next / previous link or code block"),
+    ("Tab  Shift-Tab", "next / previous link, code block or diagram"),
     ("Enter", "open the link, or copy the code"),
-    ("y", "copy the link or code"),
+    ("y", "copy the link, code or diagram source"),
+    ("s", "switch a diagram between drawing and source"),
+    ("c", "copy what a diagram shows"),
     ("H  L", "back / forward"),
     ("m a   ' a", "set mark a / go to mark a"),
     ("m A   ' A", "marks A-Z work across files"),
@@ -154,6 +157,10 @@ pub struct Pager {
     stdin_source: Option<(String, String)>,
     theme: Theme,
     hl: Highlighter,
+    dg: Diagrams,
+    /// Diagrams switched to source in other documents, by path (`None` is
+    /// stdin). `dg.as_source` holds the current document's.
+    other_toggles: HashMap<Option<PathBuf>, HashSet<(u64, u32)>>,
     max_width: usize,
     raw: bool,
     view: Rendered,
@@ -167,6 +174,9 @@ pub struct Pager {
     search: Search,
     /// Index into `view.targets`.
     focus: Option<usize>,
+    /// Focus to restore after the next layout (a reload drops the view
+    /// before laying out again).
+    keep_focus: Option<FocusKey>,
     count: Option<usize>,
     pending: Option<(char, Option<usize>)>,
     help: bool,
@@ -223,11 +233,66 @@ struct Geometry {
     toc_overlay: bool,
 }
 
+/// A focus target in a form that survives a relayout or a reload: what it
+/// is, and which copy when the document has several of the same. None of
+/// it depends on where the target is drawn, so wrapping can't change it,
+/// and a reload that moves lines keeps it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum FocusKey {
+    /// A link's URL and its place among the links to that URL, in
+    /// document order.
+    Link(String, usize),
+    /// A code block's language and text, and its place among the code
+    /// blocks with the same.
+    Code(String, String, usize),
+    /// A diagram's key: its source hash and occurrence.
+    Diagram((u64, u32)),
+}
+
+impl FocusKey {
+    fn of(view: &Rendered, i: usize) -> Option<FocusKey> {
+        let t = view.targets.get(i)?;
+        Some(match &t.kind {
+            TargetKind::Link(id) => {
+                let id = *id as usize;
+                let url = view.links.get(id)?;
+                let nth = view.links[..id].iter().filter(|u| *u == url).count();
+                FocusKey::Link(url.clone(), nth)
+            }
+            TargetKind::Code { lang, code } => {
+                let nth = view.targets[..i].iter().filter(|o| o.kind == t.kind).count();
+                FocusKey::Code(lang.clone(), code.clone(), nth)
+            }
+            TargetKind::Diagram(id) => FocusKey::Diagram(view.diagrams.get(*id as usize)?.key),
+        })
+    }
+
+    /// The target in `view` this key names, or `None` when it is gone. It
+    /// never falls back to a target with other content.
+    fn find(&self, view: &Rendered) -> Option<usize> {
+        let target = |kind: &TargetKind| view.targets.iter().position(|t| t.kind == *kind);
+        match self {
+            FocusKey::Link(url, nth) => {
+                let id = view.links.iter().enumerate().filter(|(_, u)| *u == url).nth(*nth)?.0;
+                target(&TargetKind::Link(id as u32))
+            }
+            FocusKey::Code(lang, code, nth) => {
+                let kind = TargetKind::Code { lang: lang.clone(), code: code.clone() };
+                view.targets.iter().enumerate().filter(|(_, t)| t.kind == kind).nth(*nth).map(|(i, _)| i)
+            }
+            FocusKey::Diagram(key) => {
+                let id = view.diagrams.iter().position(|d| d.key == *key)?;
+                target(&TargetKind::Diagram(id as u32))
+            }
+        }
+    }
+}
+
 /// A link to re-print as an OSC 8 hyperlink: x, y, width, URL.
 type ScreenLink = (u16, u16, u16, String);
 
 impl Pager {
-    pub fn new(start: Start, theme: Theme, hl: Highlighter, options: Options) -> Pager {
+    pub fn new(start: Start, theme: Theme, hl: Highlighter, dg: Diagrams, options: Options) -> Pager {
         let state = options.state_file.as_deref().map(State::load).unwrap_or_default();
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let (page, screen, picker, picker_root, pending_at) = match start {
@@ -246,6 +311,8 @@ impl Pager {
             stdin_source,
             theme,
             hl,
+            dg,
+            other_toggles: HashMap::new(),
             max_width: options.max_width.max(10),
             raw: false,
             view: Rendered::default(),
@@ -256,6 +323,7 @@ impl Pager {
             toc: Toc::default(),
             search: Search::default(),
             focus: None,
+            keep_focus: None,
             count: None,
             pending: None,
             help: false,
@@ -348,15 +416,16 @@ impl Pager {
         Geometry { area, header, footer, body, content_x, content_w: content as u16, toc, toc_overlay }
     }
 
-    /// Lay out again at `width`, keeping the reader's place (or going to
-    /// the place a newly opened document asked for).
+    /// Lay out again at `width`, keeping the reader's place and focus (or
+    /// going to the place a newly opened document asked for).
     fn rebuild(&mut self, width: usize) {
         let anchor = (!self.view.lines.is_empty()).then(|| self.view.anchor_at(self.top));
+        let keep = self.keep_focus.take().or_else(|| self.focus.and_then(|i| FocusKey::of(&self.view, i)));
         self.view = if self.raw {
             let outline = layout::outline(&self.page.doc);
             layout::layout_raw(&self.page.source, &outline, width, &self.theme, &mut self.hl)
         } else {
-            layout::layout(&self.page.doc, width, &self.theme, &mut self.hl)
+            layout::layout(&self.page.doc, width, &self.theme, &mut self.hl, &mut self.dg)
         };
         self.view.width = width;
         self.link_urls = if self.theme.hyperlinks {
@@ -369,7 +438,7 @@ impl Pager {
             words[i] = words[i + 1] + self.view.lines[i].words;
         }
         self.words_after = words;
-        self.focus = None;
+        self.focus = keep.and_then(|k| k.find(&self.view));
         self.top = 0;
         if let Some(at) = self.pending_at.take() {
             self.apply_at(at);
@@ -384,10 +453,15 @@ impl Pager {
         }
     }
 
-    fn toggle_raw(&mut self) {
-        self.raw = !self.raw;
+    /// Lay out again at the current width, after a setting changed.
+    fn relayout(&mut self) {
         let width = self.view.width;
         self.rebuild(width);
+    }
+
+    fn toggle_raw(&mut self) {
+        self.raw = !self.raw;
+        self.relayout();
     }
 
     // ----- movement -----------------------------------------------------
@@ -547,6 +621,13 @@ impl Pager {
             },
         };
         self.remember();
+        // Diagram toggles belong to one document: put this one's away and
+        // bring back the new one's.
+        let toggles = std::mem::take(&mut self.dg.as_source);
+        if !toggles.is_empty() {
+            self.other_toggles.insert(self.page.path.clone(), toggles);
+        }
+        self.dg.as_source = self.other_toggles.remove(&page.path).unwrap_or_default();
         self.page = page;
         self.screen = Screen::Doc;
         // Dropping the picker stops its scan, if one is still running.
@@ -555,6 +636,7 @@ impl Pager {
         self.raw = false;
         self.search = Search::default();
         self.focus = None;
+        self.keep_focus = None;
         self.toc.filter = None;
         self.toc.focused = false;
         self.pending_at = Some(at);
@@ -701,6 +783,7 @@ impl Pager {
         match Page::open(&path) {
             Ok(page) => {
                 let pos = (!self.view.lines.is_empty()).then(|| self.view.anchor_at(self.top));
+                self.keep_focus = self.focus.and_then(|i| FocusKey::of(&self.view, i));
                 self.page = page;
                 self.view = Rendered::default();
                 self.pending_at = pos.map(At::Pos);
@@ -723,9 +806,9 @@ impl Pager {
         let n = self.view.targets.len();
         if n == 0 {
             self.message = Some(if self.raw {
-                "Links and code blocks are in the rendered view (press r)".into()
+                "Links, code blocks and diagrams are in the rendered view (press r)".into()
             } else {
-                "No links or code blocks in this document".into()
+                "No links, code blocks or diagrams in this document".into()
             });
             return;
         }
@@ -760,12 +843,16 @@ impl Pager {
         self.focus.filter(|&i| i < self.view.targets.len() && self.target_visible(i))
     }
 
-    /// Enter: follow the focused link or copy the focused code block. With
-    /// nothing focused, scroll a line like less.
+    /// Enter: follow the focused link, or copy the focused code block or
+    /// diagram source. With nothing focused, scroll a line like less.
     fn activate(&mut self, n: usize) {
         let Some(i) = self.focused() else { return self.scroll_down(n) };
         match self.view.targets[i].kind.clone() {
             TargetKind::Code { code, .. } => self.copy_text(&code, "code block"),
+            TargetKind::Diagram(id) => {
+                let source = self.view.diagrams[id as usize].source.clone();
+                self.copy_text(&source, "diagram source");
+            }
             TargetKind::Link(id) => {
                 let url = self.view.links[id as usize].clone();
                 self.follow(&url);
@@ -793,15 +880,60 @@ impl Pager {
 
     fn copy_focused(&mut self) {
         let Some(i) = self.focused() else {
-            self.message = Some("Press Tab to pick a link or code block, then y".into());
+            self.message = Some("Press Tab to pick a link, code block or diagram, then y".into());
             return;
         };
         match self.view.targets[i].kind.clone() {
             TargetKind::Code { code, .. } => self.copy_text(&code, "code block"),
+            TargetKind::Diagram(id) => {
+                let source = self.view.diagrams[id as usize].source.clone();
+                self.copy_text(&source, "diagram source");
+            }
             TargetKind::Link(id) => {
                 let url = self.view.links[id as usize].clone();
                 self.copy_text(&url, "link");
             }
+        }
+    }
+
+    /// The focused diagram, or a message saying how to pick one.
+    fn focused_diagram(&mut self, key: char) -> Option<usize> {
+        if let Some(i) = self.focused()
+            && let TargetKind::Diagram(id) = self.view.targets[i].kind
+        {
+            return Some(id as usize);
+        }
+        self.message = Some(format!("Press Tab to pick a diagram, then {key}"));
+        None
+    }
+
+    /// s: switch the focused diagram between its drawing and its source.
+    fn toggle_source(&mut self) {
+        let Some(id) = self.focused_diagram('s') else { return };
+        let d = &self.view.diagrams[id];
+        let key = d.key;
+        if self.dg.as_source.remove(&key) {
+            self.relayout();
+        } else if d.shown == Shown::Source {
+            let why = d.detail.clone().unwrap_or_default();
+            self.message = Some(format!("This diagram isn't drawn: {why}"));
+        } else {
+            self.dg.as_source.insert(key);
+            self.relayout();
+        }
+    }
+
+    /// c: copy what the focused diagram shows, as plain text.
+    fn copy_drawing(&mut self) {
+        let Some(id) = self.focused_diagram('c') else { return };
+        let d = &self.view.diagrams[id];
+        match (d.shown, d.drawing.clone()) {
+            (Shown::Drawing, Some(text)) => self.copy_text(&text, "drawing"),
+            (Shown::Outline, Some(text)) => {
+                let what = d.outline_name();
+                self.copy_text(&text, what);
+            }
+            _ => self.message = Some("This diagram shows its source; y copies it".into()),
         }
     }
 
@@ -888,6 +1020,8 @@ impl Pager {
             KeyCode::Tab => self.next_target(true),
             KeyCode::BackTab => self.next_target(false),
             KeyCode::Char('y') => self.copy_focused(),
+            KeyCode::Char('s') => self.toggle_source(),
+            KeyCode::Char('c') => self.copy_drawing(),
             KeyCode::Char('H') | KeyCode::Backspace => self.go_back(),
             KeyCode::Char('L') => self.go_forward(),
             KeyCode::Char('o') => {
@@ -1223,7 +1357,7 @@ impl Pager {
             let target = &self.view.targets[i];
             let style = match target.kind {
                 TargetKind::Link(_) => self.theme.focus,
-                TargetKind::Code { .. } => self.theme.focus_border,
+                TargetKind::Code { .. } | TargetKind::Diagram(_) => self.theme.focus_border,
             };
             paint(buf, &target.spans, style);
         }
@@ -1375,11 +1509,24 @@ impl Pager {
         None
     }
 
-    /// The footer while a link or code block has focus.
+    /// The footer while a link, code block or diagram has focus.
     fn draw_target_info(&self, buf: &mut Buffer, rect: Rect, room: usize, i: usize) {
         let t = &self.theme;
         let key = t.bar.add_modifier(Modifier::BOLD);
-        let (label, actions): (String, &[(&str, &str)]) = match &self.view.targets[i].kind {
+        let (label, actions) = self.target_info(i);
+        let actions_w: usize = actions.iter().map(|(k, l)| width(k) + width(l) + 4).sum();
+        let label = truncate(&label, room.saturating_sub(actions_w + 3).max(10));
+        let mut spans = vec![Span::raw(" "), Span::styled(label, t.bar_accent), Span::raw("   ")];
+        for (k, l) in actions {
+            spans.push(Span::styled(*k, key));
+            spans.push(Span::styled(format!(" {l}   "), t.bar));
+        }
+        buf.set_line(rect.x, rect.y, &Line::from(spans), room as u16);
+    }
+
+    /// What the footer says about target `i`, and the keys it offers.
+    fn target_info(&self, i: usize) -> (String, &'static [(&'static str, &'static str)]) {
+        match &self.view.targets[i].kind {
             TargetKind::Link(id) => {
                 let url = &self.view.links[*id as usize];
                 (format!("→ {url}"), &[("Enter", "open"), ("y", "copy")])
@@ -1389,15 +1536,30 @@ impl Pager {
                 let lang = if lang.is_empty() { String::new() } else { format!("{lang} · ") };
                 (format!("Code block · {lang}{lines} line{}", if lines == 1 { "" } else { "s" }), &[("Enter", "copy")])
             }
-        };
-        let actions_w: usize = actions.iter().map(|(k, l)| width(k) + width(l) + 4).sum();
-        let label = truncate(&label, room.saturating_sub(actions_w + 3).max(10));
-        let mut spans = vec![Span::raw(" "), Span::styled(label, t.bar_accent), Span::raw("   ")];
-        for (k, l) in actions {
-            spans.push(Span::styled(*k, key));
-            spans.push(Span::styled(format!(" {l}   "), t.bar));
+            TargetKind::Diagram(id) => {
+                let d = &self.view.diagrams[*id as usize];
+                let kind = d.kind.map_or(String::new(), |k| format!(" {k}"));
+                let switched = self.dg.as_source.contains(&d.key);
+                let outline = d.outline_name();
+                let label = match (d.shown, d.detail.as_deref()) {
+                    (Shown::Source, Some(why)) if !switched => format!("Mermaid{kind} · not drawn: {why}"),
+                    (Shown::Outline, Some(note)) => format!("Mermaid{kind} · {outline} · {note}"),
+                    (Shown::Outline, None) => format!("Mermaid{kind} · {outline}"),
+                    (_, Some(note)) if !switched => format!("Mermaid{kind} · {note}"),
+                    _ => format!("Mermaid{kind}"),
+                };
+                let actions: &[(&str, &str)] = match d.shown {
+                    Shown::Drawing => &[("s", "source"), ("y", "copy source"), ("c", "copy drawing")],
+                    Shown::Outline if outline == "transcript" => {
+                        &[("s", "source"), ("y", "copy source"), ("c", "copy transcript")]
+                    }
+                    Shown::Outline => &[("s", "source"), ("y", "copy source"), ("c", "copy outline")],
+                    Shown::Source if switched => &[("s", "drawing"), ("y", "copy")],
+                    Shown::Source => &[("y", "copy")],
+                };
+                (label, actions)
+            }
         }
-        buf.set_line(rect.x, rect.y, &Line::from(spans), room as u16);
     }
 
     fn draw_toc(&self, buf: &mut Buffer, rect: Rect, overlay: bool) -> Option<(u16, u16)> {
@@ -1553,5 +1715,190 @@ mod tests {
     #[test]
     fn truncates_from_the_left() {
         assert_eq!(truncate_left("Guide › Install › Linux", 10), "…l › Linux");
+    }
+
+    fn pager(source: &str) -> Pager {
+        let page = Page::from_text("test".into(), source.into());
+        let options = Options { max_width: 100, watch: false, state_file: None };
+        let theme = Theme::new(true, crate::theme::Depth::None);
+        let mut p = Pager::new(Start::Page(page), theme, Highlighter::new(), Diagrams::default(), options);
+        p.body_h = 200;
+        p
+    }
+
+    fn kind_tag(kind: &TargetKind) -> u8 {
+        match kind {
+            TargetKind::Link(_) => 0,
+            TargetKind::Code { .. } => 1,
+            TargetKind::Diagram(_) => 2,
+        }
+    }
+
+    fn focused_kind(p: &Pager) -> Option<u8> {
+        p.focus.map(|i| kind_tag(&p.view.targets[i].kind))
+    }
+
+    /// The URL of the focused link.
+    fn focused_url(p: &Pager) -> Option<&str> {
+        match p.view.targets[p.focus?].kind {
+            TargetKind::Link(id) => Some(&p.view.links[id as usize]),
+            _ => None,
+        }
+    }
+
+    /// The source of the focused diagram.
+    fn focused_diagram_source(p: &Pager) -> Option<&str> {
+        match p.view.targets[p.focus?].kind {
+            TargetKind::Diagram(id) => Some(&p.view.diagrams[id as usize].source),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn footer_calls_a_sequence_outline_a_transcript() {
+        let mut p = pager("```mermaid\nsequenceDiagram\n  A->>B: hi\n```\n");
+        p.rebuild(80);
+        p.next_target(true);
+        let (label, actions) = p.target_info(0);
+        assert_eq!(label, "Mermaid sequence · transcript");
+        assert!(actions.contains(&("c", "copy transcript")));
+        assert_eq!(p.view.diagrams[0].outline_name(), "transcript");
+
+        // A flowchart's outline is still an outline.
+        let mut p = pager("```mermaid\nflowchart LR\nsubgraph G\nA --> B\nend\n```\n");
+        p.rebuild(80);
+        assert_eq!(p.view.diagrams[0].shown, Shown::Outline);
+        let (label, actions) = p.target_info(0);
+        assert!(label.starts_with("Mermaid flowchart · outline"), "{label}");
+        assert!(actions.contains(&("c", "copy outline")));
+    }
+
+    #[test]
+    fn focus_stays_on_a_table_link_when_its_cell_wraps() {
+        // At 98 columns both links share the row's first line; at 64 the
+        // first cell wraps and its link drops below the second.
+        let source = "| Description | Link |\n|---|---|\n\
+                      | Some words that wrap when narrow [first](https://one.example) | [second](https://two.example) |\n";
+        let mut p = pager(source);
+        p.rebuild(98);
+        let line = |p: &Pager, url: &str| {
+            let id = p.view.links.iter().position(|u| u == url).unwrap() as u32;
+            p.view.targets.iter().find(|t| t.kind == TargetKind::Link(id)).unwrap().first_line()
+        };
+        assert_eq!(line(&p, "https://one.example"), line(&p, "https://two.example"));
+        p.next_target(true);
+        assert_eq!(focused_url(&p), Some("https://one.example"));
+        p.rebuild(64);
+        assert!(line(&p, "https://one.example") > line(&p, "https://two.example"));
+        assert_eq!(focused_url(&p), Some("https://one.example"));
+        p.rebuild(98);
+        assert_eq!(focused_url(&p), Some("https://one.example"));
+    }
+
+    #[test]
+    fn focus_stays_on_its_diagram_when_a_reload_moves_lines() {
+        let dir = std::env::temp_dir().join(format!("folio-refocus-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("doc.md");
+        let diagrams = "```mermaid\nflowchart TD\n  A[Alpha] --> B[Beta]\n```\n\n\
+                        ```mermaid\nflowchart TD\n  C[Gamma] --> D[Delta]\n```\n\n\
+                        See [one](https://one.example) and [one again](https://one.example).\n";
+        std::fs::write(&path, format!("# Watch\n\n{diagrams}")).unwrap();
+
+        let options = Options { max_width: 60, watch: false, state_file: None };
+        let theme = Theme::new(true, crate::theme::Depth::None);
+        let mut p = Pager::new(Start::Page(Page::open(&path).unwrap()), theme, Highlighter::new(), Diagrams::default(), options);
+        p.body_h = 200;
+        p.rebuild(60);
+        p.next_target(true);
+        p.next_target(true);
+        assert!(focused_diagram_source(&p).is_some_and(|s| s.contains("Gamma")));
+        let src_of = |p: &Pager, i: usize| p.view.lines[p.view.targets[i].first_line()].src;
+        let gamma_line = src_of(&p, 1);
+
+        // Five lines above move the Alpha diagram to where Gamma started.
+        std::fs::write(&path, format!("# Watch\n\nOne.\n\nTwo.\n\n\n{diagrams}")).unwrap();
+        p.reload();
+        p.rebuild(60);
+        assert_eq!(src_of(&p, 0), gamma_line);
+        assert!(focused_diagram_source(&p).is_some_and(|s| s.contains("Gamma")));
+
+        // The second of two links to the same URL stays the second.
+        p.next_target(true);
+        p.next_target(true);
+        let second = p.focus;
+        assert_eq!(focused_url(&p), Some("https://one.example"));
+        std::fs::write(&path, format!("# Watch\n\n{diagrams}")).unwrap();
+        p.reload();
+        p.rebuild(60);
+        assert_eq!(focused_url(&p), Some("https://one.example"));
+        assert_eq!(p.focus, second);
+
+        // A target that is gone leaves nothing focused, rather than another.
+        std::fs::write(&path, format!("# Watch\n\n{}", diagrams.replace("Gamma", "Gamma2"))).unwrap();
+        p.focus = Some(1);
+        p.reload();
+        p.rebuild(60);
+        assert_eq!(p.focus, None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn focus_survives_a_resize_and_a_relayout() {
+        let source = "See [a link](https://example.com).\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\n```sh\necho hi\n```\n";
+        let mut p = pager(source);
+        p.rebuild(80);
+        p.next_target(true);
+        p.next_target(true);
+        assert_eq!(focused_kind(&p), Some(2));
+        p.rebuild(40);
+        assert_eq!(focused_kind(&p), Some(2));
+        let key = p.view.diagrams[0].key;
+        p.dg.as_source.insert(key);
+        p.relayout();
+        assert_eq!(focused_kind(&p), Some(2));
+        assert_eq!(p.view.diagrams[0].shown, Shown::Source);
+        p.next_target(true);
+        p.rebuild(100);
+        assert_eq!(focused_kind(&p), Some(1));
+    }
+
+    #[test]
+    fn diagram_toggles_stay_with_their_document() {
+        let dir = std::env::temp_dir().join(format!("folio-toggles-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let diagram = "```mermaid\nsequenceDiagram\n  Alice->>Bob: Hello\n```\n";
+        let (a, b) = (dir.join("a.md"), dir.join("b.md"));
+        std::fs::write(&a, format!("{diagram}\nSee [b](b.md).\n")).unwrap();
+        std::fs::write(&b, diagram).unwrap();
+
+        let options = Options { max_width: 100, watch: false, state_file: None };
+        let theme = Theme::new(true, crate::theme::Depth::None);
+        let page = Page::open(&a).unwrap();
+        let mut p = Pager::new(Start::Page(page), theme, Highlighter::new(), Diagrams::default(), options);
+        p.body_h = 200;
+        let shown = |p: &mut Pager| {
+            p.rebuild(80);
+            p.view.diagrams[0].shown
+        };
+        assert_eq!(shown(&mut p), Shown::Outline);
+        p.next_target(true);
+        p.toggle_source();
+        assert_eq!(shown(&mut p), Shown::Source);
+
+        // The same diagram in another document is not switched.
+        p.navigate_doc(Some(b.clone()), At::Top);
+        assert_eq!(shown(&mut p), Shown::Outline);
+        // Going back brings the first document's switch back, and a reload
+        // keeps it.
+        p.go_back();
+        assert_eq!(shown(&mut p), Shown::Source);
+        p.reload();
+        assert_eq!(shown(&mut p), Shown::Source);
+        p.go_forward();
+        assert_eq!(shown(&mut p), Shown::Outline);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

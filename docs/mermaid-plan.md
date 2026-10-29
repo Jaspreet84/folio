@@ -1,6 +1,6 @@
 # Mermaid diagrams in folio: implementation plan
 
-Date: 2026-10-23. Status: proposal, revision 2. It waits on the decisions in section 12. Line numbers in `file:line` references are from that date and will drift as the code changes.
+Date: 2026-10-23, updated 2026-10-28. Status: revision 2. Milestones M0 to M2 are built, two rounds of review and fixes have followed, and the owner decisions in section 12 are taken; see "Implementation status" below. Line numbers in `file:line` references are from 2026-10-23 and will drift as the code changes.
 
 This plan replaces the Phase 3 line in PLAN.md, "Mermaid (native text renderer for flowcharts and sequence diagrams; `mmdc` when installed)", with a design that can be built. It starts from the "text-first" proposal, which both first-round reviewers ranked first.
 
@@ -16,9 +16,100 @@ Appendix A maps each review item to the place where this revision handles it.
 **How claims are marked**
 
 - **[V n]**: checked on 2026-10-23 in source *n*. The sources are listed at the end.
-- **[M n]**: measured on 2026-10-23. Appendix B gives the method and where the scripts are.
+- **[M n]**: measured on 2026-10-23 (M1 to M11) or 2026-10-28 (M12 and M13, folio's own code). Appendix B gives the method and where the scripts are.
 - **[U]**: unverified. This covers estimates, inferences and design guesses.
 - `file:line`: folio's code on 2026-10-23.
+
+---
+
+## Implementation status (2026-10-28)
+
+**Built.** Milestones M0, M1 and M2 are built on the `mermaid` branch, and two rounds of review and fixes followed. The work is not merged into master yet. Readers now get:
+
+- flowcharts without subgraphs drawn, using every ladder step (decision 10);
+- flowcharts with subgraphs as outlines that list their groups (frames are M3b);
+- sequence diagrams as transcripts (drawing them is M4);
+- the source with a "Not drawn: …" note for other types, unsupported syntax and unclosed fences;
+- on a focused diagram: `s` switches between drawing and source, `c` copies what is shown, and `y` and `Enter` copy the source.
+
+**Not built yet.**
+
+- M3: the ASCII charset, BT/RL mirroring, the document cold-start budget with idle drawing, and segment splitting. M3's other item, setting the work limit, is done (6.6).
+- M3b (subgraph frames), M4 (sequence drawing), M5 (viewer), M6 and M7.
+- From the M0 to M2 lists: the engine seam and stub engine (4.4; `diagram::render` calls the flowchart code directly, and `Request` has no budget yet), the mermaid-ascii fixture parse test (10.2), and the style snapshots (10.6; a test checks each role's theme style instead).
+
+**Owner decisions taken.** The numbers are those in section 12. Where the plan recommended a choice, that choice was taken.
+
+1. The open frame.
+2. Too wide: outline or transcript, never a clipped drawing. The viewer comes in M5, so until then `Enter` on a diagram copies its source, as it does on a code block.
+3. Fences: `mermaid` and `{mermaid}`, in any case. Not `mmd`.
+4. `PLAN.md:64` is reworded: no background jobs, a work limit per diagram, and the document budget later. PLAN.md's Phase 3 line now says `mmdc` is used only when installed and enabled.
+5. M7 comes later, after M5.
+6. The decision shape `╱───╲ < > ╲───╱`, as in the mock-ups.
+8. Height guard: not built. It belongs with the viewer (M5).
+9. `TERM=linux`: no change.
+10. Ladder C. A left-to-right diagram tries normal, compact, LR labels 16 and LR labels 8, then turned, turned compact, labels 16 and labels 8.
+11. Outlines are accepted when the contents pane is open.
+13. No ambiguous-width option.
+15. The gate thresholds as written.
+
+Decisions 7, 12 and 14 are not needed yet.
+
+**Changes from the plan.** Each item names the section that now describes it.
+
+- `regex` is now a direct dependency. It was already in the dependency tree through syntect and fancy-regex 0.11, so no new crate is compiled (5.1).
+- `--diagrams` takes `draw` and `source`. `ascii` comes with M3 (8.1).
+- `s` and `c` were built in M0 instead of M5, because `Pager::relayout()` made them cheap. The `s` toggles are kept per document (8.2).
+- `BlockKind::Diagram` has a `lang` field (the fence's first word), not `info` (8.1).
+- Edges between the same two nodes: the prototype drew only the last one, so `A-->B; B-->A` showed a one-way arrow. folio draws them all (6.2 H).
+- Size limits: a source over 64 KiB still gets its outline, outlines stop at 2,000 rows, and the parser and layout have memory guards (6.1, 6.5, 6.6).
+
+From the second review round:
+
+- Flowchart syntax: a subgraph named in another subgraph's body is nested there; quoted edge text may hold link characters; shape data may be single-quoted or run over several lines; `v`, `^`, `>` and `<` after `flowchart` are directions; front-matter titles may go on over several lines (3.2, 3.3).
+- Sequence syntax: keywords in any case, `autonumber` that takes effect where it stands, `autonumber off`, `par_over`, `link` names with spaces, `wrap:` prefixes dropped, and `box` groups kept with their members (3.4, 6.5).
+- Lanes into one node must ask for the same stroke as well as the same head (6.1 F).
+- An edge label no longer ends a bus, so a labelled branch of a fan-out gets its own port (6.2 H).
+- A straight line with heads at both ends always shows a line cell between them (6.2 K).
+- Lane labels never cover another line. A lane without a head ends on its target's border. Loops and ports keep off a cylinder's rule and a subroutine's bars. Lines touch a bare text node's text (6.2 L, M).
+- The text-over-line check is stricter, the connectivity check uses the drawn ends of each edge and reads through edge labels, and a zero-width character takes no cell (6.3).
+- The work counter now tracks time, and the work limit is 500,000 (6.6).
+- Outlines list subgraphs in tree order, and wrapped rows hang 4 columns (6.5).
+- Focus is kept by content, not by source line (8.3).
+- A fence ended by its quote or list item counts as closed, and a fence name may have one pair of braces, no more (8.1).
+- Diagram titles are found by search (8.4). A sequence diagram's outline is called a transcript in the footer and in the copy message (8.2).
+
+**Gate results** (section 11). Held-out sample, 6,496 blocks; Rust release build; measured after both review rounds [M12].
+
+| Gate | Needs | Prototype | folio |
+|---|---|---|---|
+| 1. Flowcharts parse | ≥ 95% | 94.9% | 95.4% (5,371 of 5,632) |
+| 2a. Drawn at 78, no subgraphs | ≥ 88% | 92.9% | 94.9% (4,402 of 4,638) |
+| 2b. Drawn at 78, all parsed (subgraphs → outline) | ≥ 75% | 80.4% | 82.0% |
+| 3. Fitting drawings that fail a check | < 0.5% | 0.2% | 0.1% (11 of 18,504) |
+| 3. Crashes | 0 | 9 | 0 |
+| 3. Same output twice | yes | — | yes |
+| 4. p99, all ladder steps | ≤ 20 ms | 132 ms (Python) | 6.0 ms (p50 1.4 ms, max 23.5 ms) |
+| Over the work limit or the size caps (M3 gate, 6.6) | ≤ 0.2% | — | 0.1% (5 diagrams, shown as outlines) |
+| 5. 50-diagram readability review | 40 of 50 | — | not done |
+
+- Gate 3 counts differently in the two columns. The prototype's figure counts only the first step that fits at 78 columns. folio's counts every ladder step that fits.
+- Gate 5 needs a person and the other tools, so it is still to do.
+- Sequence diagrams parse at 98.6% on the held-out sample (417 of 423; prototype 97.4%).
+- The steps used at 78 columns are listed in section 7.4.
+- On the tuning sample, 98.7% of flowcharts parse, and 89.5% of those without subgraphs are drawn at 78 columns. 21 of 35,668 fitting drawings fail a check. 98.0% of sequence diagrams parse. 16 diagrams are over the work limit or the size caps.
+
+**Agreement with the prototype** [M13]. When the port was compared with the prototype, every parse result matched on all 23,946 blocks, except for deliberate changes and differences in the width tables. Drawings matched too, except where Python and the `unicode-width` crate measure a label differently, and except for the deliberate change to edges between the same two nodes.
+
+The review fixes changed more on purpose. Drawings now differ from the prototype's for diagrams with lane labels, lanes of different strokes into one node, labelled branches of a fan-out, LR self-loop labels, lanes without a head, two-headed straight lines, bare text nodes, loops and ports on cylinders or subroutines, zero-width characters, reversed edges in a shared port, and edges between the same two nodes. The parser changes in sections 3.2 to 3.4 also differ from the prototype on purpose. How many diagrams these changes affect was not measured again.
+
+**Known gaps** (left for later):
+
+- The connectivity check can count a false pair when lines end on adjacent border cells of one box side. This was seen only in random graphs with three or more kinds of line between two nodes. A wrong count only moves the diagram on to the next step.
+- Circle and double circle (drawn like a stadium) and hexagon (drawn like a decision) do not get the "simplified" note. Section 3.3 lists them for M3b.
+- Two identical back edges, where one becomes a lane, are drawn twice. The drawing is correct, but redundant.
+- Until M5, an outline shown because no drawing fits has no note in its bottom rule. "Enter: full drawing" comes with the viewer.
+- Statement splitting finds `accTitle:` and `accDescr:` lines only in that exact case. The sequence parser now reads keywords in any case, so `ACCTITLE: a; b` is still split at the `;`.
 
 ---
 
@@ -267,6 +358,10 @@ So folio does two things:
 
 - Skip blank lines.
 - A `---` … `---` front-matter block must start on the first line. Keep its `title:` and show it in the top rule: `── mermaid · flowchart · Release flow ──`. If there is no `title:` but there is a `caption:`, show the caption [U: design choice].
+  - The block is read as YAML, as far as the title needs: quoted values, comments, block scalars (`title: >-`) and an indented block all work. Only keys at the indent of the opening `---` count, so keys under `config:` are skipped.
+  - A plain or quoted `title:` or `caption:` value may go on over more deeply indented lines, or start on the line after the key. Indented lines that look like a mapping, a list or a comment are not part of a plain value, and a key whose value is a mapping or a list gives no title.
+  - A front-matter block with no closing `---` sends the diagram to source.
+  - A sequence diagram's own `title` statement replaces the front-matter title, as in Mermaid (section 3.4).
 - Skip `%%{ … }%%` directives, which may span lines and are deprecated since v10.5.0 [V5].
 - Skip whole-line `%%` comments.
 - As a lenient extra, strip a trailing `%% …` outside quotes.
@@ -274,24 +369,31 @@ So folio does two things:
 **Keyword.**
 
 - `flowchart` or `graph`, plus an optional `TB|TD|BT|RL|LR`. `graph` is documented as an alternative to `flowchart` [V1].
+  - Mermaid's arrow forms work here too: `v` is top-down, `^` bottom-up, `>` left to right and `<` right to left. The `direction` statement does not accept them.
 - `flowchart-elk`, treated as `flowchart`. The documentation says "The `flowchart-elk` diagram type still works, but is no longer needed" [V1]. Neither sample uses it [M7].
 - `sequenceDiagram`.
 - `stateDiagram` or `stateDiagram-v2`.
 - Anything else becomes `Source("<keyword> diagrams aren't drawn yet")`.
 
-**Statements.**
+**Statements.** Split on newlines, then on `;`. Where a `;` splits depends on the diagram type:
 
-- Split on newlines and on `;` outside quotes and brackets.
-- Entity codes such as `#59;` and `#quot;` are protected first, because `;` ends a statement and literal semicolons are written `#59;` [V2]. The prototype needed this, because unquoted sequence messages such as `I #9829; you` contain `;` [M1].
+- **Sequence diagrams** split at every `;`, as Mermaid does, except the `;` that ends an entity code.
+- **Flowcharts** don't split inside quotes, brackets, `>…]` shapes, `|…|` edge text, or edge text written inside a link (`-- … -->`, `== … ==>`, `-. … .->`).
+- The text of an `accTitle:` or `accDescr:` line runs to the end of the line.
+- Entity codes are protected first, because `;` ends a statement and literal semicolons are written `#59;` [V2]. Protected are `#word;` (numeric or named, such as `#59;` and `#quot;`) and `&name;` for the names the decoder knows. The prototype needed this, because unquoted sequence messages such as `I #9829; you` contain `;` [M1].
+- In flowcharts, a Markdown string (``"`…`"``) may run over several lines, as in Mermaid, but only when a later line closes it. A stray quote therefore can't swallow the rest of the diagram.
+- In flowcharts, `@{ … }` shape data may also run over several lines, but only when a later line holds a `}`. Such data is read as YAML pairs (section 3.3), so a `}` far below can't silently swallow statements.
 
-**Label decoding** (one function for every label):
+**Label decoding** (one function for every label), in this order:
 
 - `<br>`, `<br/>` and `<br />` become line breaks.
-- Entity codes `#35;` and `#quot;` and HTML character names are decoded [V1].
 - Other HTML tags are stripped.
-- A `fa:fa-…` prefix is dropped.
-- Markdown strings ``"`…`"`` keep their newlines and drop their `**` and `*` markers [V1].
-- Control characters become U+FFFD. `doc::clean` (`doc.rs:334-343`) already does this for the whole block, and labels are cleaned again.
+- Icon prefixes are dropped: `fa:`, `fab:`, `fas:`, `far:`, `fal:` and `fak:` (as in `fa:fa-car`).
+- Markdown strings ``"`…`"`` keep their newlines and drop their emphasis markers (`**`, `*`, `_`) [V1].
+- Entity codes (`#35;`, `#quot;`, `&lt;`) are decoded last, all in one pass, so what they produce is never decoded again: `#38;lt;` shows `&lt;` [V1]. Entity names are case-sensitive, as in HTML (`rArr` is ⇒ and `rarr` is →), and cover HTML 4's names.
+- Tabs become spaces. Other control characters become U+FFFD. `doc::clean` (`doc.rs:334-343`) already does this for the whole block, and labels are cleaned again.
+
+**Wrapping labels.** A label may break between two wide characters (section 6.2 G). A grapheme counts as wide only when its first character is 2 columns wide, so an Indic cluster that is 2 columns wide only because of its marks is never split.
 
 ### 3.3 Flowchart subset
 
@@ -299,23 +401,25 @@ So folio does two things:
 stmt      := chain | subgraph-open | 'end' | 'direction' DIR | ignored
 chain     := group (link group)*                     group := node ('&' node)*
 node      := ID shape? (':::' CLASS)?  |  ID '@{' key ':' value (',' key ':' value)* '}'
+value     := '"' text '"' | "'" text "'" | text up to ',' or a line break   -- '' is a quote in '…'
 shape     := '[' t ']' | '(' t ')' | '([' t '])' | '[[' t ']]' | '[(' t ')]' | '((' t '))'
            | '(((' t ')))' | '>' t ']' | '{' t '}' | '{{' t '}}'
            | '[/' t '/]' | '[\' t '\]' | '[/' t '\]' | '[\' t '/]'
 t         := '"' text '"' | '"`' markdown '`"' | text up to the closer
 link      := (ID '@')? HEAD? STROKE HEAD? ('|' t '|')?           -- A -->|x| B
            | HEAD? ('--' | '==' | '-.') t CLOSER                  -- A -- x --> B, A-.x.->B
-STROKE    := '-'{2,} | '='{2,} | '-' '.'+ '-' | '~~~'      HEAD := '<' | '>' | 'o' | 'x'
+STROKE    := '-'{2,} | '='{2,} | '-' '.'+ '-' | '~'{3,}      HEAD := '<' | '>' | 'o' | 'x'
 subgraph-open := 'subgraph' (ID (WS? '[' t ']')? | '"' t '"' | words)
 ignored   := ('classDef'|'class'|'style'|'linkStyle'|'click'|'accTitle'|'accDescr') rest
-           | ID '@{' … ('animate'|'animation'|'curve') … '}'
+           | 'title' rest                                         -- lenient; see below
+           | ID '@{' key ':' value … '}'    -- whole statement; edge settings or an edge id
 ```
 
 **Rules from Mermaid's documentation** [V1]:
 
 - **Lowercase `end`.** Lowercase `end` as node text breaks a flowchart, so folio treats it as unsupported.
 - **The `o` and `x` trap.** A link takes a following `o` or `x` as its head, so `A---oB` is a circle edge.
-- **Last label wins.** "If this is done several times, it is the last text found for the node that will be used" [V1]. The prototype already does this, and a unit test will pin it.
+- **Last label wins.** "If this is done several times, it is the last text found for the node that will be used" [V1]. The prototype already does this, and a unit test (`last_label_wins`) pins it.
 - **Link length.**
 
   | | Length 1 | Length 2 | Length 3 |
@@ -329,7 +433,7 @@ ignored   := ('classDef'|'class'|'style'|'linkStyle'|'click'|'accTitle'|'accDesc
 
   folio uses the length as the minimum number of ranks the edge spans.
 - **Groups.** `A & B --> C & D` is four edges.
-- **Invisible links.** `~~~` only affects position.
+- **Invisible links.** `~~~`, or a longer run of `~`, only affects position.
 - **Subgraph direction.** "If any of a subgraph's nodes are linked to the outside, subgraph direction will be ignored" [V1].
 - **Shapes by name.** `@{ shape: … }` dates from v11.3.0. Its documented names map to the nearest classic shape:
   - `rect`, `rounded`, `stadium`, `subproc`, `cyl`, `circle`, `dbl-circ`, `diamond`, `hex`, `lean-r`, `lean-l`, `trap-b` and `trap-t` each get their classic shape;
@@ -339,7 +443,25 @@ ignored   := ('classDef'|'class'|'style'|'linkStyle'|'click'|'accTitle'|'accDesc
 
 **Edge text without spaces.** `A -.tests.-> B` and `A --text--> B` are valid Mermaid and common. The first prototype parser required a space after `--`, which sent 57+ real flowcharts to source. The final grammar accepts both forms [M2].
 
+**Rules added while porting (M1):**
+
+- **Edge text after a head.** `o-- text --o`, `x-- text --x` and `<-- text -->` are one edge with text.
+- **Edge text after `-.`** may start with `o` or `x` (`-.optional.->`). A dotted link needs a `-` after its dots, so the letter can't be a head.
+- **`direction` and `title`.** `direction` is a keyword only before `TB`, `TD`, `BT`, `RL` or `LR`; otherwise it is a node id. As a lenient extra, a `title …` line is ignored, but `title --> x` and `title[…]` are nodes.
+- **`id@{ … }` statements.** A statement is skipped only when the whole statement is one `id@{…}` whose keys are edge settings (`animate`, `animation`, `curve`), or whose id is an edge id. Any other `id@{…}` is a node with a shape. `view: collapsed` sends the diagram to source.
+
+**Rules added in review (2026-10-28):**
+
+- **Quoted edge text.** Edge text written inside a link (`A -- "git push --force" --> B`) and `|…|` text are read with quotes in mind, so quoted text may hold `--`, `==`, `.-` and `|`. A quote that nothing closes is read as text, and then the first `|` ends `|…|` text, as before.
+- **Shape data values.** A value may be in double quotes, in single quotes (`''` is one quote, as in YAML), or plain, up to a comma or a line break. One pair of quotes is removed, and line breaks inside quotes become spaces. A `}` inside double quotes does not end the data.
+- **Shape data over several lines** is YAML: pairs, one per line or separated by commas, and `#` comments. Any other text there sends the diagram to source with 'unexpected text "…" in @{ }'. Without a later `}`, the reason is still 'unterminated @{'.
+- **Subgraph titles.** In `subgraph id [title]`, the title may be a Markdown string over several lines. The id is kept, so edges to `id` attach to the subgraph.
+
 **Subgraphs before frames exist (M0 to M3).** A flowchart that contains any `subgraph` is parsed in full but is not drawn. It gets the outline (section 6.5), which lists each subgraph's title and members, with the bottom rule "subgraphs aren't drawn yet". The prototype could lay these diagrams out without frames, but that loses the grouping, which goal 5 forbids.
+
+- **Membership follows Mermaid.** A subgraph takes every node its body names, unless a subgraph that closed earlier already took it. Inner subgraphs close first, so they win. Naming a node at the top level, before or after a subgraph, changes nothing.
+- **Subgraphs are members too.** Naming a subgraph's id in another subgraph's body nests it there, as Mermaid does, and the first subgraph to close that names it wins. A reopened subgraph moves to its new parent only until that happens. (Before the second review, the last parent always won.) Nesting never makes a cycle. The checks that prevent cycles have a step limit (6.6).
+- **Order.** The parser stores subgraphs in tree order: each subgraph is followed by those nested in it, and siblings keep their declaration order. Every index into the subgraph list (a node's subgraph, an edge end's subgraph and a subgraph's parent) is renumbered to match. Frames (M3b) can rely on this order.
 
 **Parsed and silently ignored:**
 
@@ -351,8 +473,8 @@ ignored   := ('classDef'|'class'|'style'|'linkStyle'|'click'|'accTitle'|'accDesc
 **Drawn with "simplified" in the bottom rule** (once frames land in M3b):
 
 - **Subgraph `direction`.** Ignored; members are laid out in the parent's direction. The prototype found this in 235 of 12,492 parsed tuning flowcharts [M2].
-- **An edge to or from a subgraph.** It attaches to the subgraph's first member that has no predecessor inside it (304 tuning flowcharts) [M2].
-- **Shape approximations.** Circle and double circle are drawn like a stadium; hexagon is drawn like the decision shape.
+- **An edge to or from a subgraph.** It attaches to the first member that has no edge from inside the subgraph, searching nested subgraphs too (304 tuning flowcharts) [M2]. The edge remembers the subgraph (`Edge::from_cluster`, `to_cluster`), so the outline shows the subgraph's name for that end. This is built; it only affects outlines until frames are drawn.
+- **Shape approximations.** Circle and double circle are drawn like a stadium; hexagon is drawn like the decision shape. These shapes are drawn in M2, but without the "simplified" note (a known gap).
 
 ### 3.4 Sequence subset
 
@@ -360,11 +482,12 @@ ignored   := ('classDef'|'class'|'style'|'linkStyle'|'click'|'accTitle'|'accDesc
 stmt := ('participant'|'actor') NAME ('@{' … '}')? ('as' TEXT)?
       | NAME ARROW ('+'|'-')? NAME ':' TEXT?
       | 'Note' ('left of'|'right of'|'over') NAME (',' NAME)? ':' TEXT
-      | ('loop'|'alt'|'opt'|'par'|'critical'|'break'|'rect') TEXT?  …  'end'
+      | ('loop'|'alt'|'opt'|'par'|'par_over'|'critical'|'break'|'rect') TEXT?  …  'end'
       | ('else'|'and'|'option') TEXT?
-      | ('activate'|'deactivate'|'destroy') NAME | 'autonumber' (NUM NUM?)?
+      | ('activate'|'deactivate'|'destroy') NAME | 'autonumber' (NUM NUM? | 'off')?
       | 'create' ('participant'|'actor') NAME ('as' TEXT)?
       | 'box' TEXT? … 'end' | ('link'|'links') NAME ':' REST
+      | 'title' ':'? TEXT
 ARROW := '->>' | '-->>' | '->' | '-->' | '-x' | '--x' | '-)' | '--)' | '<<->>' | '<<-->>'
 ```
 
@@ -374,10 +497,17 @@ ARROW := '->>' | '-->>' | '->' | '-->' | '-x' | '--x' | '-)' | '--)' | '<<->>' |
   - `-)` and `--)` are async;
   - `<<->>` and `<<-->>` (v11.0.0+) have heads at both ends.
 - **`end` in text.** The word `end` in sequence text must be wrapped in `()`, `[]` or `{}` [V2].
-- **Unsupported arrows.** Half-arrows and central connections (v11.12.3+) [V2] fall back to source.
-- **Names with spaces.** Participant names may contain spaces (`participant Edge Function`). Rejecting them sent 28 real diagrams to source in the first prototype run, so the final grammar accepts them [M2].
+- **Unsupported arrows.** Half-arrows and central connections (v11.12.3+) [V2] fall back to source. A `()` next to an arrow is read as a central connection.
+- **Names with spaces.** Participant names may contain spaces (`participant Edge Function`). Rejecting them sent 28 real diagrams to source in the first prototype run, so the final grammar accepts them [M2]. `activate`, `deactivate` and `destroy` take such names too.
+- **Names in messages** follow Mermaid's rule for an actor name: no `+`, `<`, `>`, `,`, `;` or `:`, and no `-` at the start or end.
+- **`title`.** A `title` statement is kept and shown in the top rule. It replaces a front-matter title. Of several, the last one that is not empty wins.
+- **Keywords in any case.** Every keyword is read in any case, as Mermaid's lexer reads them (`Note` already was). So a statement that starts with a sender named `Loop` or `Opt` opens a block. Mermaid reads it the same way, so such diagrams fail in Mermaid too. Names that only start with a keyword, such as `Endpoint` or `Boxer`, stay names.
+- **`link` and `links`** take participant names with spaces. As in Mermaid, a link to an unknown participant adds nothing, and a name that isn't valid (`link A->>B: x`) sends the diagram to source.
+- **`wrap:` and `nowrap:`.** A leading `wrap:`, `nowrap:`, `:wrap:` or `:nowrap:` (lower case only, as in Mermaid) is dropped from message, note, block, divider, alias and box text. It is kept in a `title`.
+- **`box`.** The title drops a leading word, or a leading `rgb()`, `rgba()`, `hsl()` or `hsla()` call, only if CSS reads it as a colour. Otherwise the whole text is the title. A box's members are the participants declared inside it. A participant declared in two boxes sends the diagram to source, as Mermaid fails on it.
+- **`autonumber`** takes effect where it stands, and `autonumber off` hides the numbers from there. Section 6.5 gives the numbering rule.
 - **Approximated, with a "simplified" note:**
-  - `box` groups are drawn without their background;
+  - `box` groups are drawn without their background (the transcript lists each box and its members);
   - `create` places the participant in the header;
   - activations deeper than one level are drawn as one.
 
@@ -417,7 +547,7 @@ A state diagram becomes a `FlowGraph`:
 | Flowcharts | 207 of 12,706 (1.6%) | 279 of 5,632 (5.0%) | prose that is not Mermaid; brackets inside unquoted labels such as `E[List[Result]]`; unterminated shapes. In the held-out sample, 158 of the 279 are node ids containing `#` or `++` (`C#[C#]`, `C++[C++]`); whether Mermaid accepts such ids is unverified (Q3). |
 | Sequence diagrams | 58 of 2,221 (2.6%) | 11 of 423 (2.6%) | statements outside the subset |
 
-The prototype also crashed on 2 tuning flowcharts and 9 held-out flowcharts (`KeyError`) [M7]. These are bugs to fix in the port. The corpus gate requires zero crashes.
+The prototype also crashed on 2 tuning flowcharts and 9 held-out flowcharts (`KeyError`) [M7]. These were bugs to fix in the port, and folio has no crashes on the held-out sample [M12] (section 6.1 E). The corpus gate requires zero crashes.
 
 **Empty and degenerate diagrams.** Each case has a fixed outcome:
 
@@ -447,7 +577,7 @@ The samples contain 26 parsed flowcharts with exactly one node and 150 with no v
 
 ```
 fenced code block, first info word "mermaid" or "{mermaid}"
-        │  doc.rs: BlockKind::Diagram { info, source, closed }
+        │  doc.rs: BlockKind::Diagram { lang, source, closed }
         ▼
 layout.rs: Layouter::diagram(d, width)
         │  diagram::render(source, Request { width, charset, budget }, &mut Diagrams)
@@ -564,8 +694,12 @@ pub struct Edge { pub from: u32, pub to: u32, pub stroke: Stroke, pub heads: (He
 pub enum Stroke { Solid, Dotted, Thick, Invisible }
 pub enum Head { None, Arrow, Circle, Cross }
 
-pub struct SeqDiagram { pub parts: Vec<Participant>, pub events: Vec<Event>,
-                        pub autonumber: Option<(u32, u32)> }
+pub struct SeqDiagram { pub participants: Vec<Participant>, pub events: Vec<Event>,
+                        pub autonumbers: Vec<(usize, Autonumber)>,  // (events before it, statement)
+                        pub boxes: Vec<SeqBox> }
+pub struct Autonumber { pub start: Option<u64>, pub step: Option<u64>, pub visible: bool }
+pub struct SeqBox { pub title: String, pub members: Vec<usize> }
+pub enum Block { Loop, Alt, Opt, Par, ParOver, Critical, Break, Rect }
 pub enum Event {
     Message { from: u32, to: u32, stroke: Stroke, head: SeqHead, both: bool, label: String, act: Option<bool> },
     Note { at: NotePlace, who: Vec<u32>, label: String },
@@ -574,6 +708,7 @@ pub enum Event {
 }
 ```
 
+- **`autonumber`.** `SeqDiagram` also keeps the older `autonumber: Option<(u32, u32)>`, the last numbered statement's start and step. Only the comparison with the prototype reads it.
 - **Lookups.** Ids are looked up through a `HashMap<String, u32>` that is only probed, never iterated.
 - **Order.** Everything that affects output is a `Vec` in declaration order.
 - **Why this matters.** Rust's default `HashMap` is randomly seeded and iterates in arbitrary order [V11], and snapshots need identical output on every run.
@@ -592,10 +727,11 @@ pub enum Event {
 
 ### 5.1 What folio uses
 
-All of these are already dependencies (`Cargo.toml`), so nothing is added.
+All of these were already in folio's dependency tree, so no new crate is compiled. `regex` came in through syntect and fancy-regex 0.11; the parsers made it a direct dependency in `Cargo.toml`.
 
 | Crate | Version | License | Used for |
 |---|---|---|---|
+| `regex` | 1.13.1 | MIT OR Apache-2.0 | the preamble, label decoding and the flowchart and sequence parsers |
 | `unicode-width` | 0.2.2 (2025-10-06) | MIT OR Apache-2.0 [V16] | label and grapheme widths. `width()` counts East Asian Ambiguous characters as 1 column; `width_cjk()` counts them as 2 [V10]. |
 | `unicode-segmentation` | 1.13.3 | MIT OR Apache-2.0 [V16] | grapheme clusters for measuring and wrapping |
 | `insta` | 1.49.0 (2026-10-03) | Apache-2.0 [V16] | snapshot tests (dev-dependency) |
@@ -665,7 +801,7 @@ Add `cargo-deny` 0.20.2 (license allowlist and advisories) and `cargo-about` 0.9
 
 ## 6. Layout and routing algorithms
 
-Every step below runs in the prototype unless it says otherwise. Where a detail differs from the text-first proposal, the prototype showed the change was needed, and the reason is given.
+Every step below runs in the prototype unless it says otherwise. Where a detail differs from the text-first proposal, the prototype showed the change was needed, and the reason is given. The flowchart steps (6.1 to 6.3, without frames) are ported to Rust in M2. Where folio differs from the prototype, the text says so.
 
 ### 6.1 Flowcharts: steps that run once per diagram
 
@@ -673,7 +809,9 @@ Layout uses two abstract axes: **rank**, the flow direction, and **order**, acro
 
 - TD maps rank to rows. LR maps rank to columns.
 - **BT and RL.**
-  - In M2, BT diagrams are drawn as TD and RL diagrams as LR, with "drawn top-down" or "drawn left to right" in the bottom rule. Edges and arrows stay correct; only the direction on screen changes.
+  - In M2, BT diagrams are drawn as TD and RL diagrams as LR, with "drawn top-down" or "drawn left to right" in the bottom rule. Edges and arrows stay correct; only the direction on screen changes. This is built.
+  - An LR or RL diagram that a ladder step draws top-down gets "drawn top-down to fit" instead.
+  - When a drawing has several notes, the bottom rule joins them with "; ", for example "drawn left to right; simplified".
   - In M3, the finished geometry is mirrored before painting, and the note goes away. Text is re-placed, never reversed.
   - BT and RL together are 0.2% of flowcharts (42 in both samples) [M7].
 
@@ -695,6 +833,7 @@ Layout uses two abstract axes: **rank**, the flow direction, and **order**, acro
 - **Longest path.** Run Kahn's algorithm with a min-heap on declaration index, and set `rank(v) = max(rank(u) + min_len)`.
 - **Pull sources down.** Each source with out-edges moves to `min(rank(w) − min_len)`.
 - **Normalize** so the lowest rank is 0.
+- **Guard.** Minimum lengths are clamped to 1 to 2^40, so a hand-built or extreme graph can't overflow the arithmetic.
 - **Later upgrade.** Network simplex is dagre's default ranker [V14]. Use it only if long edges become a problem.
 
 **D. Chains.**
@@ -702,10 +841,11 @@ Layout uses two abstract axes: **rank**, the flow direction, and **order**, acro
 - Each edge becomes a chain: a node, then dummies, then a node.
 - The first dummy after the upper end is a **label element** when the edge has a label. Its size is the size of the wrapped label.
 - Because labels are layout elements, they cannot collide with nodes or with each other.
+- **Guards** (folio only). The diagram is too large, and gets the outline, when the chains would hold more than 300 elements that can't become lanes, when more than 15,000 elements would be built, or when there are more than 60,000 ranks. These limits only stop memory use from growing without bound; the size caps in section 6.6 apply after them.
 
 **E. Order.**
 
-1. **Starting order.** Breadth-first from the sources in declaration order. Place each node, its chains' dummies, then its targets.
+1. **Starting order.** Breadth-first from the sources in declaration order. Place each node, its chains' dummies, then its targets. When a node is reached only through invisible edges, its chains' dummies are placed right after it too. The prototype never placed them, which made it crash (section 3.6).
 2. **Sweeps.** Up to 8 barycenter sweeps, alternating down and up:
    - each element's key is the mean position of its neighbours in the fixed rank;
    - an element with no neighbours keeps its current position;
@@ -724,8 +864,9 @@ The papers behind these phases are those dagre cites: Jünger and Mutzel; Barth,
   - the "last element" checks ignore dummies of other candidates;
   - neither v nor u has a self-loop;
   - v sends no other lane and receives none;
-  - u sends no lane.
-- **Several lanes may arrive at the same node.** They merge at its single arrowhead. This is a correct fan-in, because every lane in it ends at that node. The prototype needed this for review loops such as `B -->|changes| A` together with `C -->|fail| A` [M1].
+  - u sends no lane;
+  - the edge has no head at its source (folio only). A lane draws a head only at its target, so a back edge with a head at its source stays in the channels.
+- **Several lanes may arrive at the same node.** They merge at its single arrowhead. This is a correct fan-in, because every lane in it ends at that node. The prototype needed this for review loops such as `B -->|changes| A` together with `C -->|fail| A` [M1]. In folio, lanes into one node must also ask for the same stroke and the same head, because they share the last part of their line. A lane with another stroke or head is rejected and drawn as a reversed edge in the channels. Before the second review only the head was compared, so a dotted lane could arrive on a solid line.
 - **Repeat until stable.** Rejecting a candidate puts its dummies back, which can invalidate others.
 - **Accepted lanes.** Their dummies are removed.
 - **Rejected back edges** stay as reversed edges routed through the channels, with `▴` at the real target. dagre handles back edges this way.
@@ -739,12 +880,14 @@ None of these steps depends on the terminal width (section 8.7).
 - **Labels.** Wrap labels to the step's label width: 28, 16 or 8.
   - Words up to 16 columns are never broken. Without this rule, the prototype printed "Authoriz/e" and "OrderCre/ated" at width 8 [M1].
   - **New:** a line may break between two wide characters (CJK ideographs, kana, hangul), as CJK text has no spaces. Without this, a Japanese label of up to 8 characters could not wrap at labels 8.
+  - In folio's `wrap_label`, a grapheme counts as wide only when its first character is 2 columns wide. A Devanagari or Myanmar cluster can be 2 columns wide because of its marks, but it is part of a word and is never split.
   - Measured on flowcharts whose source contains CJK letters (3,137 tuning, 539 held-out, without subgraphs), allowing these breaks raised the drawn share at 51 columns from 62.4% to 70.2% (tuning) and from 73.3% to 81.8% (held-out). At 78 columns it rose from 86.0% to 89.3% and from 91.1% to 94.2%. For CJK sequence diagrams at 78 columns, it rose from 54.2% to 61.1% (tuning, 961) [M7].
 - **Boxes.**
   - Inner width = label width + 2. In TD it is rounded up to odd, so a single tee sits exactly in the middle.
   - Height = label lines + 2, +1 for a cylinder.
-  - A TD self-loop needs 2 inner rows.
+  - A TD self-loop needs 2 inner rows. On a cylinder they come below the rule, so the box gets one more row (folio).
   - In LR, box height is odd.
+  - A bare text node (folio) is exactly its text: no border, no padding, and no rounding to an odd size.
 - **Label elements.**
   - In TD, their width is the label width and their rank thickness is the number of label lines.
   - In LR, their thickness is the label width plus one space on each side.
@@ -755,7 +898,7 @@ None of these steps depends on the terminal width (section 8.7).
 - **New rule: a port carries one bus only.**
   - A bus is either a fan-out (one port on the upper node, several lower ends) or a fan-in (several upper ends, one port on the lower node). It is never both.
   - On a node's upper side, a link that belongs to another node's fan-out bus gets a port of its own, even when its stroke and head match the other arriving links.
-  - To find the bus, trace the link back through its edge's dummies to the node it leaves. An edge label ends the bus, because the label text breaks the line.
+  - To find the bus, trace the link back through its edge's dummies and its label to the node it leaves. An edge label does not end the bus: it sits on the line, and a reader reads straight through it. So a labelled branch of a fan-out gets its own port at its target too. Before the second review, a label ended the bus, and `A-->C; A-->|x| D; B-->D` drew a line from B that could be traced to C.
 - Revision 1 let any links with the same stroke and head share a port. That joined two buses, so a reader could trace a path that is not in the source. The reviewer's `A-->C; A-->D; B-->D; B-->E` showed it. With the new rule, D gets two ports [M9]:
   ```
       ┌───┐    ┌───┐
@@ -768,9 +911,13 @@ None of these steps depends on the terminal width (section 8.7).
   │ C │   │ D │   │ E │
   └───┘   └───┘   └───┘
   ```
+- **Edges that share a link** (folio only). Several edges can join the same two nodes on adjacent ranks with no labels. The prototype kept only the last of them, so `A-->B; B-->A` drew a one-way arrow. folio merges them in declaration order:
+  - edges with the same stroke share one line when their heads agree at each end (no head goes with any head, and a head goes with itself). The line's ends carry every head the edges ask for: `A-->B; B-->A` gives `◂──▸`;
+  - an edge with another stroke, or another head at the same end, gets a line of its own with its own ports.
+- **The port rule, extended** (folio only). A line with heads at both ends never shares a port, because a shared port would falsely connect it to the other lines there. The lines of one link keep the same order at both ends, so they don't cross.
 - Order the groups by the mean order position of their far ends.
-- Spread the ports over the side's interior cells, never the corners. A single port sits in the middle.
-- Widen the box when the groups do not fit.
+- Spread the ports over the side's interior cells, never the corners. A single port sits in the middle. In folio, ports also keep off a cylinder's rule and a subroutine's bars, and on a bare text node they use only cells of the text (step M).
+- Widen the box when the groups do not fit. A bare text node can't be widened, so that step fails instead (step M).
 
 **I. Placement across the flow** (the order axis).
 
@@ -794,7 +941,7 @@ None of these steps depends on the terminal width (section 8.7).
 **J. Placement along the flow.**
 
 - Each rank's thickness is its thickest element. Nodes are aligned to the start of the band.
-- Each channel's thickness comes from step K.
+- Each channel's thickness comes from step K. In LR, a channel may be widened further to make room for a lane label (step M).
 
 **K. Channel routing** (between rank r and rank r+1, in the style of ELK's router [V13]).
 
@@ -808,6 +955,7 @@ None of these steps depends on the terminal width (section 8.7).
    - **Hard:** if a top of A equals a bottom of B, A must lie above B. Otherwise the two vertical lines would overlap.
    - **Soft:** otherwise, cost(A above B) = number of tops of B strictly inside A's span + number of bottoms of A strictly inside B's span. These are the crossings that order creates. Prefer the cheaper order.
 4. **Break cycles** by removing the lightest soft edge. Number the tracks by longest path. Segments that do not overlap share a track.
+   - The prototype searched for the next cycle from the start after each removal. folio carries on the depth-first search from where it stands, which removes the same edges without repeating the search. A test checks that both remove the same edges on 400 random graphs.
 5. **Channel height:**
    - a stem row, if any segment needs a track or any piece has an arrowhead at its upper end;
    - plus one row per track;
@@ -815,6 +963,7 @@ None of these steps depends on the terminal width (section 8.7).
 6. **Minimum heights:**
    - at least 1 row between two TD ranks that both hold nodes or labels;
    - at least 2 rows plus the stem when a straight dotted or thick piece ends at a node, so its style shows. Without this, the `-.->` edge in mock-up 1 had no visible stroke cell [M1];
+   - the same when a straight piece with heads at both ends, of any stroke, ends at a node (folio). One line cell then always shows between the heads: `◂─▸`, `o─o` and `✕─✕` in compact LR, and `▴`, `│`, `▾` in TD. Without it, the heads touched (`◂▸`, `oo`, or `▴` directly above `▾`);
    - in LR, at least 4 columns (normal) or 2 (compact).
 7. **Hard conflicts.** Hard constraints that form a cycle, or two segments that each need to be above the other, cannot be met without splitting a segment with an extra jog, as ELK does [V13].
    - Revision 1's prototype silently dropped a hard constraint, which drew overlapping lines.
@@ -829,7 +978,8 @@ None of these steps depends on the terminal width (section 8.7).
 - **Arrowheads.**
   - At a node, the arrowhead goes in the last cell before the border, and the border stays plain.
   - A reversed edge gets `▴` in the stem row.
-  - A link without a head ends on the border, which turns into `┴`.
+  - A link without a head ends on the border, which turns into `┴`. A lane without a head does the same at its target (`│ A ├┄┄┐` in TD, `└─┰─┘` in LR).
+  - A bare text node has no border, so a line without a head stops in the cell next to the text, pointing at it.
 - **Labels.** Pieces stop one cell short of a label's text.
 - **Dummies.** Dummies in a thick rank get a vertical run through it.
 - **New rule: crossings.**
@@ -864,14 +1014,26 @@ None of these steps depends on the terminal width (section 8.7).
 - **Lanes are painted last, shortest span first.**
   - In TD, a lane leaves v's right side at its middle row, runs up a lane column, and enters u's right side next to `◂`.
   - The lane column is 2 cells right of anything drawn in the rows it spans, and far enough right for the label on the exit stub (`├─ retry ─┘`).
+  - In TD, the label goes on the exit stub past every line the stub crosses, and the lane column moves right to make room: `│ C ├──│─ retry ─┘`. So the label never covers another lane's line.
   - In LR, lanes run below the drawing and enter u from the bottom with `▴`.
+  - In LR, the label goes on the lane's own run, between its two corners, with a line cell at each end. It takes the first place where it covers no other line, since a lane painted later may cross the run. When placing along the flow (step J), the channel before v's rank is widened until the label fits there. If there is still no room, the step counts the label as dropped and the ladder moves on. On the held-out sample, no fitting drawing fails this way.
+  - A lane without a head ends on its target's border, which becomes a tee (step L).
   - Lanes follow the crossing rule like any other bus.
 - **Self-loops in TD** use this pattern, and the loop counts toward the node's right extent:
   ```
   │ Retry ├─┐ again
   │       │◂┘
   ```
-- **Self-loops in LR** are built in M2, with the same pattern below the box [U: not prototyped]. Revision 1's prototype dropped them silently. Until they exist, an LR step of a diagram with a self-loop fails the "nothing dropped" check, and the diagram moves to a top-down step, which draws the loop. This affects 53 parsed flowcharts (37 tuning, 16 held-out) [M7].
+- **Self-loops in LR** are built in M2 (they were not prototyped). They use the TD pattern turned: out of the bottom border, round, and back up into it, with the label to the right. The rank is widened to hold the label and 2 blank cells after it, so at least 3 blank cells separate the label from the next channel's first line. With less, `└┘ retry on failure ├─▸` read as the label of the next edge. Revision 1's prototype dropped them silently, and its checked version failed the "nothing dropped" check on every LR step. That affected 53 parsed flowcharts (37 tuning, 16 held-out) [M7].
+- **One loop per node** (folio). A self-loop is drawn in its own stroke, with its own head. Several self-loops on one node share one loop when one loop can show them all: the same stroke, heads that agree, the same label or none, and no head where the loop leaves. Otherwise the step counts them as dropped, and the diagram gets the outline.
+- **Shapes with inner lines** (folio). Loops and ports keep off a cylinder's rule and a subroutine's inner bars. Box borders have no owner, so a line that met them would form a `┼` that no check sees.
+  - In LR, ports on a cylinder skip the rule row. In TD, ports on a subroutine skip the bar columns. Widening a box for more ports uses each shape's own margin.
+  - A TD self-loop on a cylinder uses the rows below the rule, and the box gets a row for it.
+  - An LR self-loop on a subroutine leaves to the right of the bar.
+  - A TD lane leaves a cylinder from a row below the rule.
+- **Bare text nodes** (`shape: text`, folio). A bare node is exactly its text, with no border and no padding.
+  - Ports use only cells of the text. Lines and lanes leave from and end beside the text, and a line without a head stops next to it (step L).
+  - A bare node that would need widening for more port groups counts as dropped, since there is nothing to widen. So does a self-loop on a bare node, since there is no border to loop on. Either way the ladder moves on.
 
 **N. Clusters** (subgraph frames, milestone M3b; not prototyped).
 
@@ -899,14 +1061,17 @@ None of these steps depends on the terminal width (section 8.7).
 
 **Checks.** These run on every drawing, in release builds too, as part of the ladder. A step that fails a check is treated like a step that does not fit, and the ladder moves on.
 
-1. **Text over line.** No label cell may also carry line bits, except where text is placed over a line on purpose: frame titles, `else` titles and lane labels.
+1. **Text over line.** No text cell may cover a line or a box border. This includes the blank cells around a label and the second cell of a wide character. The exception is text placed over a line on purpose: frame titles, `else` titles and lane labels. Such text may cover only the line of the bus it was placed for, never another bus's line or a box border. (Before the second review, every cell under such text was exempt, so a lane label could hide another lane.)
 2. **Cell check.** A cell drawn by two different buses must be a clean right-angle crossing. Any other sharing is a defect: two lines along the same cell, or a line ending on another bus's line.
 3. **Connectivity trace.**
    - Follow the visible line bits cell to cell to find each connected net.
    - For a net that contains edges with sources S and targets T, every pair in S × T must be an edge of the source, in either direction. Any other pair is a false connection.
    - This is the check the reviewer asked for. It traces the painted canvas, not the router's intentions.
+   - In folio, a line shared by several edges (step H) counts every edge it stands for, so `◂──▸` is a link in both directions.
+   - In folio, S and T are each edge's drawn ends, its upper and lower node, not its declared source and target. These differ for a back edge reversed for ranking. With the declared ends, `X --- B` was rejected where `B --- X` drew the same picture and passed.
+   - In folio, the trace reads straight through an edge label: the line ends just above and below the label count as joined. So a merge that a reader would trace through a label is caught.
 4. **Hard conflicts** in the router (step K.7).
-5. **Nothing dropped.** For now this covers only LR self-loops (step M).
+5. **Nothing dropped.** In the prototype this covered only LR self-loops. folio draws those (step M), so here it covers what folio can't place: self-loops on one node that can't share a loop, an LR lane label with no room on its run, and a bare text node that would need widening or has a self-loop.
 
 **Measured with the checks** (at 78 columns, flowcharts without subgraphs, step chosen by fit alone) [M7]:
 
@@ -921,6 +1086,8 @@ None of these steps depends on the terminal width (section 8.7).
 | text over line | 0 | 0 | 1 | 1 |
 
 With the rules, a drawing that passes may still contain clean crossings. These appear in 8.7% (tuning) and 8.9% (held-out) of fitting drawings [M7]. The few remaining defects are prototype bugs. They are never shown, because the check moves the diagram to the next step, but the gate tracks their count (section 11).
+
+In folio (held-out sample, after both review rounds), 11 of 18,504 fitting drawings fail a check (0.1%) [M12]. That count covers every ladder step that fits at 78 columns, not only the first one, so it is not directly comparable with the table above.
 
 **Line cells.**
 
@@ -971,6 +1138,7 @@ With the rules, a drawing that passes may still contain clean crossings. These a
 **Text.**
 
 - Labels are measured by grapheme cluster. A wide cluster takes 2 cells, and no line can land on the second cell.
+- A cluster of no width, such as U+200B from `&#8203;` or a soft hyphen from `&shy;`, joins the cell before it, or is left out at the start of a label. So the cells match the columns a terminal prints, and boxes stay square.
 - The left padding of a centered label is `(inner − width) / 2`.
 
 ### 6.4 Sequence diagram layout
@@ -1025,22 +1193,36 @@ No boxes are repeated at the bottom.
 
 ### 6.5 Outline and transcript
 
+Both sit between the same two rules as a drawing. The top rule says `mermaid · flowchart (outline)` or `mermaid · sequence (transcript)`. Unlike drawings, they are not centered.
+
 **Flowchart outline.**
 
-- **Subgraphs first.** If the diagram has subgraphs, one line per subgraph comes first, in declaration order: `Group one: Receive order, Ship it`. Nested subgraphs are indented 2 columns per level.
-- **Then the edges.** One line per edge, in declaration order, followed by unlinked nodes: `Receive order ─▸ In stock?`, `In stock? ─yes─▸ Ship it`, `Back-order ┄▸ Orders DB`.
-- Lines wrap with a 2-column hanging indent.
+- **Subgraphs first.** If the diagram has subgraphs, one line per subgraph comes first, in tree order: each subgraph is followed by those nested in it, and siblings keep their declaration order (section 3.3). For example, `Group one: Receive order, Ship it`. Nested subgraphs are indented 2 columns per level.
+- **Then the edges.** One line per visible edge, in declaration order: `Receive order ─▸ In stock?`, `In stock? ─yes─▸ Ship it`, `Back-order ┄▸ Orders DB`.
+  - The line is `─`, `┄` or `━` for a solid, dotted or thick edge. The heads are `▸` and `◂` for arrows, `o` for a circle and `✕` for a cross.
+  - An end that named a subgraph shows the subgraph's name, not the member the edge was attached to (section 3.3).
+- **Then the nodes that no visible edge links.** This includes nodes linked only by invisible links, which the prototype left out.
+- Lines wrap with a 4-column hanging indent. A nested line starts only 2 columns deeper, so a wrapped row can't be mistaken for one.
 
 **Sequence transcript.**
 
-- Messages are numbered, using `─▸` and `┄▸`.
+- **Participants.** When some participant has no line of its own (no message, note, `create` or `destroy`), the first line lists them all: `Participants: API, Bob (actor), Client`. So no participant is lost. A participant named in a box line (below) counts as having a line.
+- **Boxes.** Then one line per `box`: `box Frontend services: Web, Mobile`. A box without a title gives `box: API`, and one without members gives `box Title`. A box with neither gets no line.
+- **Messages** are numbered 1, 2, 3 when the diagram has no `autonumber`. Otherwise the numbers follow Mermaid:
+  - the count starts at 1 with a step of 1, and runs through every message, whether its number is shown or not;
+  - each `autonumber` statement takes effect where it stands: a start sets the next number (and the step back to 1), a step sets the step, and 0 counts as left out;
+  - numbers are shown only after an `autonumber` and before an `autonumber off`.
+
+  The arrow shows the stroke and the head: `─▸` and `┄▸` for arrows, `──` and `┄┄` for no head, `─✕` for a cross, `─▹` for async, and `◂─▸` for `<<->>`.
 - `Note right of API: …` lines.
+- `create participant X` (or `create actor X`) and `destroy X` lines, where they happen. Activations get no line.
 - Block headers (`alt valid`, `else invalid`, `end`) sit at the block's level, with their contents indented 2 columns.
 
 **Always fits.**
 
-- The total indent (block level plus hanging indent) is capped at a third of the width. Deep `alt`/`loop` nesting inside a list or quote, where the inner width can be as small as 8 (`MIN_INNER`, `layout.rs:17`), stops indenting there.
-- Lines are wrapped with folio's existing wrap, which breaks words longer than a line (`text.rs:153`).
+- A line starts at most a third of the width in, and its wrapped rows at most 2 columns past that. Deep `alt`/`loop` nesting inside a list or quote, where the inner width can be as small as 8 (`MIN_INNER`, `layout.rs:17`), stops indenting there.
+- Lines are wrapped with the diagram module's `pre::wrap`, which breaks words longer than a line, as folio's existing wrap does (`text.rs:153`). A word broken this way is not joined back together with a space.
+- **Length.** An outline or transcript stops after 2,000 rows and ends with a line such as "900 more lines not shown".
 
 Both are ordinary prose flows for search.
 
@@ -1060,7 +1242,7 @@ Both are ordinary prose flows for search.
   - Two diagrams with **no dummies** took 2.5 s and 2.1 s. Each has one rank of 78 to 82 nodes.
   - So the cost tracks the widest rank (elements in one rank, dummies included) and the total number of elements more than the node count.
   - Across all 17,836 parsed flowcharts, the widest rank has p50 3, p99 12, p99.9 29 and max 101. The element count has p99 60, p99.9 177 and max 2,798.
-- Rust should be much faster [U]. The gate below is what counts.
+- Rust should be much faster [U]. The gate below is what counts. Measured in folio after both review rounds, all ladder steps of one diagram take p50 1.4 ms, p99 6.0 ms and at most 23.5 ms on the held-out sample [M12].
 
 **Limits per diagram.**
 
@@ -1069,11 +1251,15 @@ Both are ordinary prose flows for search.
   - at most 300 elements in all.
 
   9 and 4 of 17,836 parsed flowcharts exceed these two caps [M8] [U: tune on Rust timings]. Over a cap, the outline is shown with "too large to draw here".
+- **Large sources** (folio). A source over 64 KiB is still parsed, up to 256 KiB, so it gets its outline with "too large to draw here". A larger source isn't read at all and shows its source with the same reason.
+- **Parser guard** (folio). Groups multiply: `A & B & … --> …` makes one edge per pair, and each edge copies the label. So the flowchart parser stops with "too large to draw here" (the source is shown) when a statement would take the diagram past 5,000 edges, or past 256 KiB of label text copied into edges. This guards memory, not time.
+- **Nesting guard** (folio). The checks that keep subgraphs from nesting in themselves (section 3.3) stop after 2,000,000 steps, with the same result. Real diagrams need a few hundred; thousands of deeply nested subgraphs could otherwise take seconds.
 - **Work counter.**
-  - `Work` counts the inner-loop steps of crossing counting, transpose, placement pushes, router constraints and checks.
+  - `Work` counts inner-loop steps: crossing counting, transpose, placement pushes, the router's constraint pairs, cycle breaking and track pass, every canvas cell written and every owner scanned, the checks (each cell and owner, and the owner pairs in shared cells), and rendering.
+  - Because cells and owners are counted, the count tracks time: about 15,000 to 29,000 steps per millisecond in a release build. Before the second review, painting, cycle breaking and the checks were mostly not counted. The rate then differed about sevenfold between diagrams, and a dense diagram inside the size caps took 56 to 75 ms per ladder step without reaching the limit.
   - All ladder steps of one diagram share one limit.
   - When it runs out, the diagram gets the outline with "too large to draw here".
-  - Set the limit in M3 so that the corpus's p99.9 diagram fits and a diagram that hits it takes no more than about 20 ms in release [U].
+  - The limit is `WORK_LIMIT = 500_000` (`src/diagram/mod.rs`). A diagram that hits it has spent roughly 17 to 33 ms; the plan aimed for about 20 ms. The corpus's p99.9 diagram needs about 400,000. On the held-out sample, 5 diagrams (0.1%) are over the limit or the size caps after preparation [M12]. This limit was planned for M3 and was set after the second review. It replaces M2's provisional 50,000,000.
 - **Viewer.** `render_full` gets 4 times the work limit. If that runs out, the viewer shows the outline and says so. Pressing `Enter` therefore cannot freeze the pager for longer than the limit allows [U: target ≤ 100 ms].
 
 **Limit per document (pager cold start; M3).**
@@ -1087,9 +1273,9 @@ Both are ordinary prose flows for search.
   - After each one it lays out again, keeping the reader's place (`anchor_at`/`line_for`) and focus (section 8.3).
 - **The `less -F` check** (`main.rs:157-163`) uses the same budget. If any diagram was deferred, folio opens the pager instead of printing, so printed output never contains "drawing…". The `Diagrams` cache from that check is passed into the pager, as the `Highlighter` already is (`main.rs:166`), so no work is repeated.
 - **Print mode, pipes and tests** have no document budget, only the per-diagram limits, so their output stays complete and deterministic.
-- **This replaces revision 1's fallback.** That fallback ("move slow cases to Phase 3's job queue") relied on a job system that folio does not have (`PLAN.md:64`). This plan needs no background threads. Decision 4 asks to reword `PLAN.md:64`.
+- **This replaces revision 1's fallback.** That fallback ("move slow cases to Phase 3's job queue") relied on a job system that folio does not have (`PLAN.md:64`). This plan needs no background threads. Decision 4 reworded `PLAN.md:64` to match.
 
-**Gate (M3).** p99 ≤ 20 ms for all ladder steps of one diagram in a release build, on the held-out set; and no more than 0.2% of diagrams hit the work limit [U: thresholds].
+**Gate (M3).** p99 ≤ 20 ms for all ladder steps of one diagram in a release build, on the held-out set; and no more than 0.2% of diagrams hit the work limit [U: thresholds]. Both already hold: p99 6.0 ms, and 0.1% over the work limit or the size caps [M12].
 
 ---
 
@@ -1120,13 +1306,13 @@ Each step is a complete render plus the checks. Ranking, ordering and lane selec
 - The tuning sample points the same way: at 78 columns, A keeps 24.6% of LR diagrams in LR and C keeps 45.1% [M7].
 - For all flowcharts without subgraphs, the drawn share at 78 columns is 92.9% (A), 94.0% (B) and 94.5% (C) on the held-out sample.
 - TD diagrams use the same steps under every ladder.
-- **Recommendation: C.** It keeps the author's direction more often, draws more diagrams and makes them shorter. This is subject to the visual review of LR drawings with 8-column labels.
+- **Decided: C** (decision 10), as recommended. It keeps the author's direction more often, draws more diagrams and makes them shorter. folio's LR ladder is normal, compact, LR labels 16, LR labels 8, turned, turned compact, labels 16 and labels 8. The visual review of LR drawings with 8-column labels is still to do (gate 5).
 
 **Never clip.**
 
 - Print and piped output never clip.
 - The pager shows the outline rather than a clipped drawing. A clipped sequence diagram would drop participants.
-- `Enter` always shows the full drawing, within the viewer's work limit.
+- `Enter` always shows the full drawing, within the viewer's work limit. This comes with the viewer in M5; until then `Enter` copies the source.
 
 ### 7.2 Which width applies
 
@@ -1136,7 +1322,7 @@ Each step is a complete render plus the checks. Ranking, ordering and lane selec
   - At 51 columns, 67.5% of held-out flowcharts without subgraphs and 45.6% of sequence diagrams are drawn. At 78 columns the figures are 92.9% and 78.6% [M7].
   - Opening the pane on an 80-column terminal therefore turns about a quarter of flowcharts and a third of sequence diagrams into outlines, and changes the document's line count.
   - The cache makes the switch instant. The reader's place is kept by the existing anchor, and focus by section 8.3.
-  - Whether that is acceptable is decision 11.
+  - Decision 11 accepts this.
 - **The open frame** (a labeled top rule and a bottom rule, like the Footnotes separator at `layout.rs:305-316`) gives the drawing the whole width. A code box would cost 4 columns.
 
 ### 7.3 Example diagrams
@@ -1278,6 +1464,7 @@ All figures below use that definition. Revision 1 checked only the width, and on
   - In the tuning sample, 61.9% of subgraph flowcharts would be drawn at 78 columns even without frames, and 38.1% would still get the outline.
 - **What the old figures hid.** In the prototype as reviewed, the old "fits" definition gave 87.7% (tuning) and 93.0% (held-out) for flowcharts without subgraphs at 78 columns. Under the checks, the figures fall to 78.3% and 83.0%. The two routing rules bring them back to 87.7% and 92.9% (section 6.3).
 - **Which steps were used at 78** (held-out, no subgraphs, ladder A): normal 2,209, compact 104, turned 1,372 + 37, labels 16 385, labels 8 191, outline 329.
+- **The same in folio** (ladder C, after both review rounds; 4,638 flowcharts) [M12]: normal 2,223, compact 105, LR labels 16 210, LR labels 8 288, turned 1,023, turned compact 30, labels 16 346, labels 8 177, outline 236.
 - **Natural width** (tuning, normal step, source direction): median 90, p90 208.
 - **Natural height:** median 19, p90 47. 8.6% are taller than 48 rows.
 - **merman-ascii, for comparison:**
@@ -1349,16 +1536,20 @@ All figures below use that definition. Revision 1 checked only the width, and on
 
 ### 8.1 Changes by file
 
+This table describes what M0 to M2 changed. Line references point to the code before the change (2026-10-23). Items for later milestones are marked with the milestone.
+
 | File | Change |
 |---|---|
-| `src/doc.rs` | New `BlockKind::Diagram { info: String, source: String, closed: bool }` (enum at `doc.rs:21-37`). In the `NodeValue::CodeBlock` arm (`doc.rs:186-190`), a **fenced** block whose first info word, lower-cased with `{}` removed, is `mermaid` becomes a `Diagram`. `~~~` fences need nothing extra. An unclosed fence is still a `Diagram`, so a half-typed diagram under watch mode shows its source, not an error. |
-| `src/layout.rs` | `TargetKind::Diagram(u32)` (`layout.rs:57-61`), indexing a new `Rendered::diagrams: Vec<DiagramRef>`. Like `links`, this index is global, so `nest()` (`layout.rs:106-140`) needs no renumbering. `layout()` (`layout.rs:201`) gains `dg: &mut Diagrams`. The `Layouter` struct (`layout.rs:286-291`) gains `dg` and `diagrams`. New arm in `block()` (`layout.rs:326`) and a new `Layouter::diagram()`. **The width assertion goes in `Layouter::diagram`**, as `debug_assert!` that every row is at most the `width` passed in. It cannot go in `Rendered::push` (`layout.rs:95`): blocks build their output in `Rendered::default()`, whose `width` is 0 until `layout()` sets it (`layout.rs:205`), so it would fail on every line. The existing `lines_never_exceed_the_width` test still covers the final output. The source fallback calls `code()` (`layout.rs:445`) with a flag that chooses the target kind (8.2), then adds the note line. |
-| `src/text.rs` | Grapheme-aware `clip(segs, w) -> (Vec<Seg>, bool)` and `slice(segs, from, w)`. Fix the comment on `fit()`, which says "Pad or truncate" but only pads (`text.rs:250-257`). |
-| `src/theme.rs` | New `Theme` fields (`theme.rs:14-49`) and two new palette entries per theme (`theme.rs:54-99`), set in `Theme::new` (`theme.rs:103`); see 8.5. |
-| `src/pager.rs` | See 8.2 to 8.4, and the idle drawing step in 6.6. |
-| `src/viewer.rs` (new) | `Viewer`, `ViewerAction`. |
-| `src/main.rs` | `--diagrams draw\|ascii\|source` in `Args` (`main.rs:24-53`), default `draw`. `source` reproduces today's output and behavior exactly (8.2). Pass it through `Options` (`main.rs:134`) and the print path. Build one `Diagrams` for the `less -F` check (`main.rs:157-163`) and pass it into `run_pager` with the `Highlighter`, so its cache is reused. If the check deferred any diagram, open the pager (6.6). The `TERM=linux` question is decision 9. |
-| `tests/render.rs` | `"diagrams"` in `FIXTURES` (`tests/render.rs:8`). A `Diagrams` passed into `render()` (`tests/render.rs:15-18`), with no document budget. The two direct `layout::layout` calls in `urls_are_hidden_when_the_terminal_shows_hyperlinks` (`tests/render.rs:159`, `tests/render.rs:162`). A `"diagram:<kind>"` arm in the exhaustive match (`tests/render.rs:132-135`). New style snapshots (section 10, item 6). |
+| `src/doc.rs` | New `BlockKind::Diagram { lang: String, source: String, closed: bool }` (enum at `doc.rs:21-37`). `lang` is the fence's first info word, as for code blocks. In the `NodeValue::CodeBlock` arm (`doc.rs:186-190`), a **fenced** block becomes a `Diagram` when its first info word, with at most one surrounding `{…}` pair removed, is `mermaid` in any case (`is_mermaid`). So `{Mermaid}` is a diagram, and `mermaid}`, `{{mermaid}}` and `{}` are code blocks. `mmd` is not accepted (decision 3). `~~~` fences need nothing extra. An unclosed fence is still a `Diagram`, so a half-typed diagram under watch mode shows its source with "Not drawn: the code fence isn't closed", not an error. A fence counts as closed when comrak closed it, or when any non-blank source line comes after its last line. So a fence ended by its quote or list item, with text after it, is drawn. Only a fence cut off by the end of the document is unclosed. Trailing blank lines are trimmed from the source of a fence with no closing line. |
+| `src/layout.rs` | `TargetKind::Diagram(u32)` (`layout.rs:57-61`), indexing a new `Rendered::diagrams: Vec<DiagramRef>`. A `DiagramRef` holds the source, the toggle key (8.2), the kind, how the diagram is shown (`Shown::Drawing`, `Outline` or `Source`), the shown text for `c`, and a note for the footer. Like `links`, this index is global, so `nest()` (`layout.rs:106-140`) needs no renumbering. `layout()` (`layout.rs:201`) gains `dg: &mut Diagrams`. The `Layouter` struct (`layout.rs:286-291`) gains `dg`, `diagrams` and a count of the diagrams seen per source hash. A new arm in `block()` (`layout.rs:326`) calls the new `Layouter::diagram()`, which handles `--diagrams source`, the reader's toggle, an unclosed fence, and otherwise calls `diagram::render`. `Layouter::framed()` draws the rules and the rows. **The width assertions are in `Layouter::framed`**, as `debug_assert!`s that the drawing and every row are at most the `width` passed in. They cannot go in `Rendered::push` (`layout.rs:95`): blocks build their output in `Rendered::default()`, whose `width` is 0 until `layout()` sets it (`layout.rs:205`), so they would fail on every line. The existing `lines_never_exceed_the_width` test still covers the final output. The source fallback, `Layouter::diagram_source()`, calls `code()` (`layout.rs:445`), sets the target kind to `Diagram` (8.2), then adds the note line. |
+| `src/text.rs` | The comment on `fit()` is fixed: it said "Pad or truncate" but only pads (`text.rs:250-257`). Grapheme-aware `clip` and `slice` come with the viewer (M5). |
+| `src/theme.rs` | Two new palette entries per theme, `diagram_line` and `diagram_edge` (`theme.rs:54-99`), and four new `Theme` styles (`theme.rs:14-49`): `diagram_line`, `diagram_edge`, `diagram_label` and `diagram_note`, set in `Theme::new` (`theme.rs:103`); see 8.5. |
+| `src/pager.rs` | `s`, `c`, the footer, help and messages (8.2); `Pager::relayout()` and focus kept across relayouts (8.3); the `s` toggles kept per document (8.2). The idle drawing step (6.6) comes in M3. |
+| `src/viewer.rs` (new, M5) | `Viewer`, `ViewerAction`. Not written yet. |
+| `src/main.rs` | `--diagrams draw\|source` in `Args` (`main.rs:24-53`), default `draw`. `ascii` comes with M3. `source` reproduces the earlier output and behavior exactly (8.2). One `Diagrams` is built in `main` and used by the print path and the `less -F` check (`main.rs:157-163`). It is passed into `run_pager` with the `Highlighter`, so its cache is reused. Opening the pager when the check deferred a diagram (6.6) comes with the budget in M3. `TERM=linux` changes nothing (decision 9). |
+| `src/lib.rs` | `pub mod diagram`. |
+| `Cargo.toml` | `regex` as a direct dependency (5.1). |
+| `tests/render.rs` | `"diagrams"` in `FIXTURES` (`tests/render.rs:8`), with `tests/fixtures/diagrams.md`. A `Diagrams` passed into `render()` (`tests/render.rs:15-18`), with no document budget. The two direct `layout::layout` calls in `urls_are_hidden_when_the_terminal_shows_hyperlinks` (`tests/render.rs:159`, `tests/render.rs:162`). A `"diagram:<kind>"` arm in the exhaustive match (`tests/render.rs:132-135`). New tests for fences, unclosed fences, sources over 64 KiB, title truncation, bottom-rule notes, widths, `--diagrams source` and role styles. The style snapshots (section 10, item 6) are not written yet. |
 
 **Call sites of `layout()`:** there are six, not five as the text-first proposal said.
 
@@ -1370,23 +1561,25 @@ All figures below use that definition. Revision 1 checked only the width, and on
 
 **Frame.**
 
-- A top rule labeled `── mermaid · flowchart ──`, with the front-matter title when there is one, and a bottom rule carrying the notes.
+- A top rule labeled `── mermaid · flowchart ──`, with the title when there is one (`── mermaid · flowchart · Release flow ──`), and a bottom rule carrying the notes. The title comes from the front matter or from a sequence diagram's own `title` statement. Outlines and transcripts say `flowchart (outline)` or `sequence (transcript)`.
 - **Truncation.**
-  - The title is truncated with `…` so the label fits in the width minus 4, as `code()` truncates its label (`layout.rs:468`).
-  - If even `── mermaid ──` does not fit, the rule is plain `─`.
-  - Notes in the bottom rule are truncated the same way.
-- The drawing is centered when it is narrower than the content width.
+  - A rule's label must fit in the width minus 6, so at least 2 `─` show on each side.
+  - The title matters more than "(outline)" or the kind. It is shown in full, or cut with `…` to at least 10 columns, after the longest prefix that leaves room: `mermaid · flowchart (outline) · `, then `mermaid · flowchart · `, then `mermaid · `. Failing that, it is cut shorter.
+  - Without room for a title, the label falls back to `mermaid · flowchart (outline)`, then `mermaid · flowchart`, then `mermaid`. If even `── mermaid ──` does not fit, the rule is plain `─`.
+  - Notes in the bottom rule are joined with "; " and cut with `…` to the width minus 6. If fewer than 4 columns of them would be left, the bottom rule is plain.
+- A drawing is centered when it is narrower than the content width. Outlines and transcripts start at the left edge.
 - **The note line under a source fallback.**
-  - It reads "Not drawn: <reason>". Quoted user text is cut to 30 columns with `…` and passed through `doc::clean` (`doc.rs:334-343`).
+  - It reads "Not drawn: <reason>". Quoted user text is cut to 30 columns with `…`, and the reason is cleaned with `doc::clean_line`, so it holds no control characters.
   - The line is wrapped like a paragraph, so it fits at any width.
 
 **Focus target.**
 
-- A drawn diagram's target spans are its two rules, at full width. Focus paints them with `focus_border`: add a `TargetKind::Diagram(_) => focus_border` arm next to the code arm (`pager.rs:1223-1226`).
+- A drawn diagram's target spans are its two rules, at full width. Focus paints them with `focus_border`, through a `TargetKind::Diagram(_)` arm next to the code arm (`pager.rs:1223-1226`).
 - Targets are already sorted in reading order (`layout.rs:164`), so `Tab` and `Shift-Tab` reach diagrams with no other change.
 - **Source views and target kinds.**
-  - With `--diagrams source`, every Mermaid block is today's code box with today's `TargetKind::Code`: `Enter` and `y` copy, as now. Output and behavior match today's exactly.
-  - A diagram that falls back to source, or that the reader switched to source with `s`, keeps `TargetKind::Diagram`. That way `s` switches it back, and `Enter` opens the viewer.
+  - With `--diagrams source`, every Mermaid block is the earlier code box with `TargetKind::Code`: `Enter` and `y` copy, as before. Output and behavior match the earlier ones exactly.
+  - A diagram that falls back to source, or that the reader switched to source with `s`, keeps `TargetKind::Diagram`. That way `s` switches it back. On a diagram that fell back to source, `s` says why it isn't drawn.
+  - Until the viewer exists (M5), `Enter` on any diagram copies its source, as it does on a code block (decision 2).
 
 **Per-diagram toggle state (`s`).**
 
@@ -1398,27 +1591,36 @@ All figures below use that definition. Revision 1 checked only the width, and on
   - Across a watch reload, a toggle survives edits elsewhere in the document and new diagrams added above it.
   - Editing the diagram's own source resets it to drawn.
   - Adding an identical copy above it shifts the occurrence numbers for that source only. This is rare.
+  - **Toggles belong to one document.** When another document opens, the pager puts the current set away under the document's path (`other_toggles`) and brings back the new document's set. Going back to a document restores its toggles. A watch reload of the same file keeps them.
 - **Why not position alone:** keying by position among diagrams would move every toggle when a diagram is added above.
 - `s` calls `Pager::relayout()` (8.3).
 
-**Keys.** `s`, `c` and `Y` are unused today; the key match is at `pager.rs:853-907`.
+**Keys.** `s` and `c` were unbound before M0; the key match is at `pager.rs:853-907`. `s` and `c` were planned for M5, but they were built in M0, because `Pager::relayout()` made them cheap. The viewer column is M5.
 
-| Key | Focused diagram | In the viewer |
+| Key | Focused diagram | In the viewer (M5) |
 |---|---|---|
-| `Enter` | open the viewer (`activate`, `pager.rs:764`) | close |
+| `Enter` | copy the Mermaid source, as on a code block (`activate`, `pager.rs:764`); from M5, open the viewer | close |
 | `s` | switch between drawing and source in place | switch |
 | `y` | copy the Mermaid source (`copy_focused`, `pager.rs:793`) | copy the source |
-| `c` | copy what is drawn (drawing or outline) as plain text | copy the full drawing |
+| `c` | copy what is shown (drawing or outline) as plain text | copy the full drawing |
 
-**Footer** (`draw_target_info`, `pager.rs:1378`). For example `Mermaid flowchart · drawn top-down to fit`, followed by `Enter view  s source  y copy  c copy drawing`.
+Without a focused diagram, `s` and `c` say "Press Tab to pick a diagram, then s" (or `c`).
 
-**Messages and help.**
+**Footer** (`draw_target_info`, `pager.rs:1378`; the text now comes from `Pager::target_info`, so it can be tested).
 
-- Update `next_target` (`pager.rs:721-728`) and `copy_focused` (`pager.rs:795`) to say "link, code block or diagram".
-- Add lines to `HELP` (`pager.rs:40-61`).
-- The raw-view message becomes "Links, code blocks and diagrams are in the rendered view".
+- A drawing: `Mermaid flowchart · drawn top-down to fit`, followed by `s source  y copy source  c copy drawing`.
+- An outline: `Mermaid flowchart · outline · subgraphs aren't drawn yet`, followed by `s source  y copy source  c copy outline`.
+- A sequence diagram's outline is called a transcript, as in its top rule: `Mermaid sequence · transcript`, followed by `s source  y copy source  c copy transcript`. After `c`, the message says "Copied the transcript to the …".
+- A source fallback: `Mermaid · not drawn: <reason>`, followed by `y copy`. A diagram the reader switched to source offers `s drawing  y copy`.
+- `Enter view` joins the keys when the viewer exists (M5).
 
-**Viewer wiring.** `viewer: Option<Viewer>` in `Pager` (`pager.rs:150-188`):
+**Messages and help** (built).
+
+- `next_target` (`pager.rs:721-728`) and `copy_focused` (`pager.rs:795`) say "link, code block or diagram".
+- `HELP` (`pager.rs:40-61`) mentions diagrams for `Tab` and `y`, and has lines for `s` and `c`.
+- The raw-view message is "Links, code blocks and diagrams are in the rendered view (press r)".
+
+**Viewer wiring** (M5). `viewer: Option<Viewer>` in `Pager` (`pager.rs:150-188`):
 
 - checked first in `on_key`, as `help` is (`pager.rs:819-824`);
 - drawn last, as `help` is (`pager.rs:1177-1180`);
@@ -1426,15 +1628,22 @@ All figures below use that definition. Revision 1 checked only the width, and on
 
 ### 8.3 Keeping focus across relayouts
 
-`rebuild()` clears focus today (`pager.rs:371`). Phase 2 lists this as a known gap (`PLAN.md:282`). `s`, the idle drawing step and the contents pane make it worse.
+Before M0, `rebuild()` cleared focus (`pager.rs:371`). Phase 2 lists this as a known gap (`PLAN.md:282`). `s`, the idle drawing step and the contents pane would make it worse.
 
-**Fix:**
+**Fix** (built):
 
-1. Add `Pager::relayout()`. It calls `rebuild()` at the current width (`self.view.width`). Today the pager lays out again only when the width changes (`pager.rs:303-305`), so `s` and the idle step need this path.
-2. Before any relayout, remember the focused target as (source line of its first line, kind, its position among the targets that start on that source line).
-3. Afterwards, look it up again.
+1. `Pager::relayout()` calls `rebuild()` at the current width (`self.view.width`). Before, the pager laid out again only when the width changed (`pager.rs:303-305`), so `s` and the idle step need this path.
+2. Before any relayout or reload, the pager remembers the focused target by its content, as a `FocusKey` (`pager.rs`):
+   - a link by its URL and its place among the document's links to that URL;
+   - a code block by its language, its text and its place among identical code blocks;
+   - a diagram by its `DiagramRef` key, the same (source hash, occurrence) key the `s` toggles use (8.2).
+3. Afterwards, it looks the target up again by that key.
 
-This also keeps focus across resizes and reloads. The reader's scroll place is already kept by `anchor_at`/`line_for`.
+No part of the key depends on where the target is drawn or on its source line. So focus stays on the same target when wrapping changes (a table cell that wraps can reorder its links) and when a reload moves lines. The reader's scroll place is kept separately, by `anchor_at`/`line_for`.
+
+**When focus is cleared.** If the target is gone, focus is cleared; it is never moved to another target. That happens after a reload that removed the target or changed its content (for a diagram, its source), and in the raw view, which has no targets. Focus is also cleared when another document opens, and by `Esc`.
+
+The first version (M0) used (source line of the target's first line, kind, place among the targets on that line). The second review found that this moved focus to the wrong target in two cases: a wrapped table cell that reorders its links, and a reload that inserts lines above the target.
 
 ### 8.4 Search and reading time
 
@@ -1449,6 +1658,7 @@ This also keeps focus across resizes and reloads. The reader's scroll place is a
 **Other flows:**
 
 - Outlines and transcripts are ordinary prose flows.
+- The diagram's title, as shown in the top rule, is a flow at the column where it is drawn. A title cut with `…` is found up to the cut. The rule line's word count is the shown title's word count.
 - The source fallback keeps today's code flows.
 - No text is ever both a drawn label and a source line, so there are no double matches.
 
@@ -1461,7 +1671,7 @@ This also keeps focus across resizes and reloads. The reader's scroll place is a
 | raw view (`r`) | unchanged: `layout_raw` shows the fence and its source |
 | print, pipes, the `less -F` path | the same pure layout, so the same drawing; a diagram that does not fit prints its outline, so piped output never loses information |
 | `--color never`, `NO_COLOR` | the same characters, no color; the structure lives in the glyphs |
-| `--diagrams ascii` | ASCII glyphs, rules and titles (section 6.3) |
+| `--diagrams ascii` (M3) | ASCII glyphs, rules and titles (section 6.3) |
 | `--diagrams source` | today's code box and today's `Code` target |
 
 **Diagram lines need more contrast than code-box borders.**
@@ -1491,7 +1701,7 @@ The terminal's real background and 256-color palette are unknown. 0x282C34 is an
 | `EdgeLabel` | `fg(p.muted)` + italic |
 | `Frame` | `fg(p.diagram_line)` |
 | `FrameTitle` | `code_label` (muted italic) |
-| `Note` | `dim` + italic |
+| `Note` | `fg(p.muted)` + italic (built as the `diagram_note` style, also used for the "Not drawn" line and bottom-rule notes) |
 
 **Tests.** The tests never see styles today. `render()` always uses the dark theme (`tests/render.rs:16`), and the "80 color" snapshots are `to_plain` text. Section 10 adds style snapshots, and section 11 adds a manual check on a light-background terminal before M2 is frozen. `PLAN.md:259` already notes the light theme was never checked on a real Mac.
 
@@ -1539,7 +1749,7 @@ The terminal's real background and 256-color palette are unknown. 0x282C34 is an
 
 ### `mmdc`
 
-Change PLAN.md from "`mmdc` when installed" to "when installed **and enabled**".
+PLAN.md now says `mmdc` is used only when installed **and enabled** (decision 4), not just when installed.
 
 - mermaid-cli 12.0.0 (2026-09-24, MIT) needs Node.js ≥ 22.13.0 and has Puppeteer ^25 as a peer dependency [V7].
 - If enabled, it would run in the image phase's background jobs, with a timeout and a disk cache.
@@ -1633,18 +1843,26 @@ Revision 1 estimated 35 days (planning for 42). That sat at the bottom of the re
 
 | Milestone | Contents | What readers get | Days [U] |
 |---|---|---|---|
-| **M0 Plumbing** | `BlockKind::Diagram`, fence detection with MyST options, labeled source box with the note line, `TargetKind::Diagram`, `y`, `--diagrams`, `Pager::relayout()`, focus kept across relayouts, fixture | diagrams are labeled and copyable; focus survives resize and reload (closes a Phase 2 gap) | 3–4 |
-| **M1 Parsers and outlines** | preamble, label decoding (with breaks between wide characters), flowchart and sequence parsers, degenerate cases, outline (with subgraph membership) and transcript, source reasons, search flows, engine seam and stub, fixture parse test, corpus harness with the frozen held-out sample | every supported diagram shows a readable outline or transcript that always fits | 6–7 |
-| **M2 Flowchart core** | port of the prototype (about 2,000 lines of Python): cycles, ranks, chains, order, lanes, **port rule**, placement, router with hard-conflict detection, **crossing rule**, self-loops including LR, canvas with owners, **checks**, shapes, roles and the new colors, label flows, TD and LR, all ladder steps (order per decision 10), size caps and work counter, cache with eviction and prepared IR, BT/RL drawn with a note, style snapshots, light-terminal check | flowcharts without subgraphs are drawn, correctly | 13–16 |
-| **M2 checkpoint** | corpus gate with the kill criteria below | — | (in M2) |
+| **M0 Plumbing** (built) | `BlockKind::Diagram`, fence detection with MyST options, labeled source box with the note line, `TargetKind::Diagram`, `y`, `--diagrams`, `Pager::relayout()`, focus kept across relayouts, fixture; also `s` with its state and `c`, moved here from M5 | diagrams are labeled and copyable; focus survives resize and reload (closes a Phase 2 gap) | 3–4 |
+| **M1 Parsers and outlines** (built) | preamble, label decoding (with breaks between wide characters), flowchart and sequence parsers, degenerate cases, outline (with subgraph membership) and transcript, source reasons, search flows, engine seam and stub, fixture parse test, corpus harness with the frozen held-out sample | every supported diagram shows a readable outline or transcript that always fits | 6–7 |
+| **M2 Flowchart core** (built) | port of the prototype (about 2,000 lines of Python): cycles, ranks, chains, order, lanes, **port rule**, placement, router with hard-conflict detection, **crossing rule**, self-loops including LR, canvas with owners, **checks**, shapes, roles and the new colors, label flows, TD and LR, all ladder steps (order per decision 10), size caps and work counter, cache with eviction and prepared IR, BT/RL drawn with a note, style snapshots, light-terminal check | flowcharts without subgraphs are drawn, correctly | 13–16 |
+| **M2 checkpoint** (gates 1 to 4 pass) | corpus gate with the kill criteria below | — | (in M2) |
 | **M3 Flowchart hardening** | segment splitting, BT/RL mirroring, ASCII charset (including rules and titles), document cold-start budget and idle drawing, property tests, benchmark gate | `--diagrams ascii`; fast start on documents with many diagrams | 7–9 |
 | **M3b Subgraph frames** | frames (section 6.2 N), titles, edges across frames, frame checks, own gate below | subgraph diagrams drawn | 6–9, plus up to 5 for plan B |
 | **M4 Sequence** | column solver, rows, notes, frames and messages in front of lifelines, activations, `autonumber`, ladder, transcript, checks, tests | sequence diagrams drawn | 8–9 |
-| **M5 Viewer and keys** | bounded viewer, `Enter`, `s` with its state, `c`, footer and help, README and PLAN, tmux runs | full-size drawings and copying | 5–6 |
+| **M5 Viewer and keys** | bounded viewer, `Enter` opens it, the height guard (decision 8), the viewer's footer and help, README and PLAN, tmux runs (`s` and `c` moved to M0) | full-size drawings | 5–6 |
 | **Total M0–M5 with M3b** | | | **48–60; plan for 60 (65 if plan B is needed)** |
 | M7 Wider than the reading width | x-offset for diagrams and tables (section 7.6) | more diagrams drawn on wide terminals | 4 |
 | M6 State diagrams | section 3.5 (composite states need M3b) | state diagrams drawn | 4–5 |
 | Later | class diagrams (compartments, UML heads); subgraph `direction` by recursive layout | | 5 + 2 |
+
+**Status on 2026-10-28.** M0, M1 and M2 are built, on the local `mermaid` branch and not yet committed. Two rounds of review and fixes followed (see "Implementation status" at the top). From M3, the work limit is set (6.6). Some items in the M0 to M2 lists are not done:
+
+- M1: the engine seam and stub engine (4.4), and the fixture parse test of mermaid-ascii's inputs (10.2).
+- M2: the style snapshots (10.6); a unit test checks each role's theme style instead. The light-terminal check has not been recorded.
+- M2 checkpoint: gate 5, the 50-diagram review.
+
+The other milestones are not started.
 
 **What ships if later milestones slip.**
 
@@ -1659,21 +1877,21 @@ Revision 1 estimated 35 days (planning for 42). That sat at the bottom of the re
 
 ### M2 checkpoint: kill criteria
 
-These are measured on the **held-out** sample, with the definition of "drawn" in 7.4. The prototype's result is in brackets. The owner should confirm these thresholds before the Rust measurement (decision 15).
+These are measured on the **held-out** sample, with the definition of "drawn" in 7.4. The brackets give the prototype's result and folio's after M2 and both review rounds (2026-10-28, Rust release build) [M12]. The owner confirmed these thresholds before the Rust measurement (decision 15).
 
-1. ≥ 95% of flowcharts parse [94.9%; see Q3 on `C#`/`C++` ids].
-2. At 78 columns, ≥ 88% of parsed flowcharts without subgraphs are drawn [92.9%], and ≥ 75% of all parsed flowcharts are drawn with subgraphs sent to the outline [80.4%].
+1. ≥ 95% of flowcharts parse [prototype 94.9%; folio 95.4%, 5,371 of 5,632; see Q3 on `C#`/`C++` ids].
+2. At 78 columns, ≥ 88% of parsed flowcharts without subgraphs are drawn [prototype 92.9%; folio 94.9%, 4,402 of 4,638], and ≥ 75% of all parsed flowcharts are drawn with subgraphs sent to the outline [prototype 80.4%; folio 82.0%].
 3. Correctness:
    - no drawing that folio shows fails a check (enforced by construction);
-   - fewer than 0.5% of drawings that fit fail a check [0.2%];
-   - no crashes [prototype: 9 on the held-out sample];
-   - identical output when rendered twice.
-4. p99 ≤ 20 ms for all ladder steps in a release build [Python, single process: 132 ms].
-5. In the 50-diagram review, folio's drawing is at least as readable as merman-ascii's or mmdflux's in at least 40 of the diagrams that those tools draw.
+   - fewer than 0.5% of drawings that fit fail a check [prototype 0.2%, first fitting step only; folio 0.1%, 11 of 18,504, every fitting step];
+   - no crashes [prototype: 9 on the held-out sample; folio: 0];
+   - identical output when rendered twice [folio: yes].
+4. p99 ≤ 20 ms for all ladder steps in a release build [Python, single process: 132 ms; folio: 6.0 ms, with p50 1.4 ms and max 23.5 ms].
+5. In the 50-diagram review, folio's drawing is at least as readable as merman-ascii's or mmdflux's in at least 40 of the diagrams that those tools draw [not done yet: it needs a person and the other tools].
 
-If 2 or 5 fails:
+Gates 1 to 4 pass; gate 5 is still to do. If gate 2 or 5 fails:
 
-1. Spend up to one week replacing steps C to I with ascii-dag (plan B) behind the engine seam, keeping folio's router, painter and checks, and measure again.
+1. Spend up to one week replacing steps C to I with ascii-dag (plan B) behind the engine seam (4.4; not built yet), keeping folio's router, painter and checks, and measure again.
 2. If it still fails, the owner chooses between outlines for complex diagrams and an optional merman cargo feature. That feature would need the size and license checks in section 5, and folio's checks would still apply to its output.
 
 **M3b gate (subgraph frames):**
@@ -1684,7 +1902,7 @@ If 2 or 5 fails:
 
 If it fails, evaluate ascii-dag's cluster layout for up to 5 days. Otherwise subgraph diagrams keep the outline, which loses nothing.
 
-**M4 gate (sequence, held-out):** ≥ 95% parse [97.4%]; ≥ 72% drawn at 78 columns [78.6%]; no message junctions; no crashes.
+**M4 gate (sequence, held-out):** ≥ 95% parse [prototype 97.4%; folio's parser 98.6% [M12]]; ≥ 72% drawn at 78 columns [78.6%]; no message junctions; no crashes.
 
 ---
 
@@ -1695,40 +1913,44 @@ If it fails, evaluate ascii-dag's cluster layout for up to 5 days. Otherwise sub
 | # | Risk | Mitigation |
 |---|---|---|
 | 1 | Subgraph frames were not prototyped. They affect 20.4% (tuning) and 13.4% (held-out) of parsed flowcharts [M7]. Frames add width and constrain ordering. | Until M3b, these diagrams get an outline that lists every group, so nothing is lost. M3b has its own gate and plan B (ascii-dag clusters, section 5.2). The subset is reported as its own row. |
-| 2 | Placement quality in Rust differs from the prototype. | Port the prototype's test diagrams first and compare output. Property tests and the M2 checkpoint. |
-| 3 | Wrapping to 8 makes tall drawings: 76×47 for the 6-participant example. | Decision 8 (a height guard). |
+| 2 | Placement quality in Rust differs from the prototype. | Port the prototype's test diagrams first and compare output. Property tests and the M2 checkpoint. Done for M2: folio's parse results (on both samples) and drawings match the prototype's, apart from deliberate changes and width-table differences [M13], and the M2 checkpoint's gates 1 to 4 pass. The review rounds added more deliberate changes (see "Implementation status"). |
+| 3 | Wrapping to 8 makes tall drawings: 76×47 for the 6-participant example. | Decision 8: a height guard, built with the viewer (M5). |
 | 4 | Narrow sequence steps let frame titles cover a lifeline row. | Documented; titles are never cut. |
-| 5 | Terminals that draw Ambiguous characters wide (CJK locales) misalign boxes. Greek and Cyrillic labels are Ambiguous too [V8]. | `--diagrams ascii` removes every Ambiguous glyph folio adds, including rules and titles. Labels and the rest of folio need decision 13. |
-| 6 | Fonts and the Linux console lack some glyphs [U]. | ASCII charset; decision 9 applies one rule to all of folio's box drawing. |
-| 7 | The `╱ ╲` decision corners do not join `─` cleanly in some fonts [U]. | Glyph test page on Mac terminals (Q1), then decision 6. |
+| 5 | Terminals that draw Ambiguous characters wide (CJK locales) misalign boxes. Greek and Cyrillic labels are Ambiguous too [V8]. | `--diagrams ascii` (M3) removes every Ambiguous glyph folio adds, including rules and titles. For labels and the rest of folio, decision 13 adds no option for now. |
+| 6 | Fonts and the Linux console lack some glyphs [U]. | ASCII charset (M3). Decision 9 keeps one rule for all of folio's box drawing: nothing changes under `TERM=linux`. |
+| 7 | The `╱ ╲` decision corners do not join `─` cleanly in some fonts [U]. | Decision 6 kept `╱ ╲` before the glyph test page. The test page on Mac terminals (Q1) is still to do. |
 | 8 | The Mermaid grammar grows: 12.2.0 was released 2026-10-13 [V6]. | Strict subset; unknown syntax falls back to source on its own. |
 | 9 | folio draws something Mermaid rejects, or the reverse. | Mirror the documented traps; the fallback loses nothing; track source rates on both samples (Q3). |
-| 10 | Pathological diagrams are slow: 10.3 s in Python for the slowest, with the cost driven by the widest rank [M8]. | Size caps including the widest rank and element count, the work counter, the document budget with idle drawing, the bounded viewer and the M3 benchmark gate. No background threads are needed. |
+| 10 | Pathological diagrams are slow: 10.3 s in Python for the slowest, with the cost driven by the widest rank [M8]. | Size caps including the widest rank and element count, the work counter, the document budget with idle drawing, the bounded viewer and the M3 benchmark gate. No background threads are needed. After the review rounds, folio's p99 for all ladder steps of one diagram is 6.0 ms, and the work limit stops a diagram after roughly 17 to 33 ms [M12]. |
 | 11 | Snapshot churn while tuning. | Deterministic algorithms; tune on the corpus before committing snapshots. |
-| 12 | About 5,500 lines to maintain, including tests [U]. | Small modules with a role-only API; the engine seam allows a different backend later. |
+| 12 | About 5,500 lines to maintain, including tests [U]. After the review rounds, `src/diagram` alone is about 9,300 lines, its unit tests included. | Small modules with a role-only API. The engine seam (4.4, not built yet) would allow a different backend later. |
 | 13 | The crossing rule's half-cell gap may be too faint in some fonts [U]. | Visual review on several terminals. Fallback: leave one full blank cell on each side of a crossing (costs width at crossings; 8.9% of fitting held-out drawings have one [M7]). |
 | 14 | The held-out sample differs from the tuning sample (more LR, README, ADR and selected-repo content). This revision looked at its aggregate counts. | Gates use it only. Do not tune on its individual failures; if that happens, collect a fresh sample before the gate. |
 | 15 | The new colors assume a typical background; real terminal palettes vary [U]. | 3:1 or better on white, One Dark and black [M11]; manual light-terminal check; style snapshots. |
 
 ### Decisions for the owner
 
-1. **Frame:** the open frame (recommended; gives the full width) or the same rounded box as code blocks (4 columns narrower)?
-2. **Too wide in the pager:** outline or transcript plus `Enter` (recommended), or a clipped drawing with `›` marks? Sequence diagrams are never clipped either way.
-3. **Fence names:** `mermaid` (what GitHub documents [V22]) and MyST's `{mermaid}` [V23] (recommended), and also `mmd`?
+Taken on 2026-10-28. Where the plan recommended a choice, that choice was taken. Decisions 7, 12 and 14 are not needed yet and stay open.
+
+1. **Frame:** the open frame (recommended; gives the full width) or the same rounded box as code blocks (4 columns narrower)? **Decided: the open frame.**
+2. **Too wide in the pager:** outline or transcript plus `Enter` (recommended), or a clipped drawing with `›` marks? Sequence diagrams are never clipped either way. **Decided: outline or transcript, never clipped.** The viewer comes in M5; until then `Enter` on a diagram copies its source, as on a code block.
+3. **Fence names:** `mermaid` (what GitHub documents [V22]) and MyST's `{mermaid}` [V23] (recommended), and also `mmd`? **Decided: `mermaid` and `{mermaid}`, in any case; not `mmd`.**
 4. **PLAN.md wording:**
    - change "`mmdc` when installed" to "when installed and enabled";
    - change `PLAN.md:64` ("Slow work (images, diagrams) will run in background jobs in Phase 3") so that diagrams use bounded work and idle drawing instead, and background jobs belong to images only.
-5. **Wider than the reading width:** do M7 after M5 (recommended; data in section 7.6), or leave it to Phase 4?
-6. **Decision shape:** `╱───╲ <  > ╲───╱` as in the mock-ups, or `╭───╮ <  > ╰───╯`, which avoids the diagonals? Decide after the glyph test page (Q1).
-7. **After sequence diagrams:** state (cheaper; reuses the flowchart engine; 3.8%) or class (4.7% in this sample [M3])?
-8. **Height guard:** prefer the transcript when a label-wrapped drawing is more than about 3 times as tall as the transcript? [U: threshold]
-9. **`TERM=linux`:** switch all of folio's box drawing to ASCII (code boxes, tables, rules and diagrams), or none of it? Switching diagrams alone would leave code boxes (`╭`) and tables (`╞═╡`) as they are today. Whether the console's fonts have these glyphs is unverified (Q2).
-10. **Ladder order for LR diagrams:** A (turn first, as revision 1), B, or C (recommended; section 7.1)?
-11. **Contents pane over diagrams:** accept that opening the pane at 80 columns turns many diagrams into outlines (recommended; instant, place kept), or keep drawings by showing the pane as an overlay while a drawn diagram is on screen, or use decision 2's clipped mode?
-12. **Frames in sequence diagrams:** draw frame borders in front of lifelines, as messages are (recommended and measured), or keep `┼` where a frame crosses a lifeline as a special case of the "one bus" rule?
-13. **Ambiguous width:** add a folio-wide option (for example `--ambiguous wide`) that measures East Asian Ambiguous characters as 2 columns with `width_cjk()` [V10], for terminals in CJK locales? It would affect tables, code boxes and labels, not just diagrams.
-14. **Who builds it,** and is a 48–60 day range (plan for 60) acceptable, with the slip order in section 11?
-15. **Gate thresholds:** confirm the M2, M3b and M4 thresholds in section 11 before the Rust port is measured.
+
+   **Decided: both changes, as recommended.** `PLAN.md:64` is reworded: diagrams are drawn during layout without background threads, each with a work limit, and the budget for documents with many diagrams comes later. PLAN.md's Phase 3 line now says `mmdc` is used only when installed and enabled.
+5. **Wider than the reading width:** do M7 after M5 (recommended; data in section 7.6), or leave it to Phase 4? **Decided: M7 later, after M5.**
+6. **Decision shape:** `╱───╲ <  > ╲───╱` as in the mock-ups, or `╭───╮ <  > ╰───╯`, which avoids the diagonals? Decide after the glyph test page (Q1). **Decided: `╱───╲ <  > ╲───╱`, as in the mock-ups.** The glyph test page (Q1) has not been done yet.
+7. **After sequence diagrams:** state (cheaper; reuses the flowchart engine; 3.8%) or class (4.7% in this sample [M3])? **Open; not needed until after M4.**
+8. **Height guard:** prefer the transcript when a label-wrapped drawing is more than about 3 times as tall as the transcript? [U: threshold] **Decided: not built yet; it belongs with the viewer (M5).**
+9. **`TERM=linux`:** switch all of folio's box drawing to ASCII (code boxes, tables, rules and diagrams), or none of it? Switching diagrams alone would leave code boxes (`╭`) and tables (`╞═╡`) as they are today. Whether the console's fonts have these glyphs is unverified (Q2). **Decided: none of it; `TERM=linux` changes nothing.**
+10. **Ladder order for LR diagrams:** A (turn first, as revision 1), B, or C (recommended; section 7.1)? **Decided: C.** A left-to-right diagram tries normal, compact, LR labels 16 and LR labels 8, then turned, turned compact, labels 16 and labels 8.
+11. **Contents pane over diagrams:** accept that opening the pane at 80 columns turns many diagrams into outlines (recommended; instant, place kept), or keep drawings by showing the pane as an overlay while a drawn diagram is on screen, or use decision 2's clipped mode? **Decided: accept the outlines.**
+12. **Frames in sequence diagrams:** draw frame borders in front of lifelines, as messages are (recommended and measured), or keep `┼` where a frame crosses a lifeline as a special case of the "one bus" rule? **Open; needed for M4.**
+13. **Ambiguous width:** add a folio-wide option (for example `--ambiguous wide`) that measures East Asian Ambiguous characters as 2 columns with `width_cjk()` [V10], for terminals in CJK locales? It would affect tables, code boxes and labels, not just diagrams. **Decided: no option.**
+14. **Who builds it,** and is a 48–60 day range (plan for 60) acceptable, with the slip order in section 11? **Open; not needed now.**
+15. **Gate thresholds:** confirm the M2, M3b and M4 thresholds in section 11 before the Rust port is measured. **Decided: the thresholds as written.**
 
 ### Open questions (to check, not to decide)
 
@@ -1785,7 +2007,7 @@ If it fails, evaluate ascii-dag's cluster layout for up to 5 days. Otherwise sub
 
 ## Appendix B: measurements
 
-All measurements were made on 2026-10-23 on the development machine (Python 3.12 in WSL Ubuntu, and Rust on Windows). The prototype and the measurement scripts are in [`docs/mermaid-prototype/`](mermaid-prototype/README.md), and the paths below are relative to that folder. The GitHub samples, the per-diagram results (`results.jsonl`) and the downloaded verification files are kept outside the repository, because the samples are other people's content.
+Measurements M1 to M11 were made on 2026-10-23, and M12 and M13 on 2026-10-28, on the development machine (Python 3.12 in WSL Ubuntu, and Rust on Windows). The prototype and the measurement scripts are in [`docs/mermaid-prototype/`](mermaid-prototype/README.md), and the paths below are relative to that folder. The GitHub samples, the per-diagram results (`results.jsonl`) and the downloaded verification files are kept outside the repository, because the samples are other people's content.
 
 - **[M1] First prototype and examples.**
   - `proto/proto.py` (about 1,900 lines). Run: `python3 -I proto/proto.py 80 < proto/mock/flow1.mmd`.
@@ -1820,6 +2042,17 @@ All measurements were made on 2026-10-23 on the development machine (Python 3.12
   - README sample: 9,043 files, p50 1, p90 3, p99 9, max 92.
   - All six files: 28,871 files, p50 1, p90 4, p99 12, max 101.
 - **[M11] Contrast ratios.** `proto2/contrast.py` → `proto2/contrast.txt`. WCAG 2 relative luminance. The 256-color values follow folio's `nearest_256` (`theme.rs:201-221`) with xterm default palette values.
+- **[M12] folio's corpus gate (M2).**
+  - `proto2/gate_blocks.py` writes the blocks of a sample to a JSONL file, outside the repository. folio's `examples/mermaid_gate.rs` runs folio's Mermaid code over them and prints the section 11 numbers: parse rates, drawn shares at 38, 51, 78, 100 and 118 columns, the steps used at 78, check failures, crashes, the twice-rendered comparison and timings.
+  - Run: `cargo run --release --example mermaid_gate -- BLOCKS.jsonl held` (or `tune`).
+  - Held-out sample: the same 6,496 blocks as [M7].
+  - It also counts the diagrams over the work limit or the size caps after preparation.
+  - The numbers in this plan come from the run after the second review round, with `WORK_LIMIT` at 500,000.
+- **[M13] Differential tests against the prototype.**
+  - Parsers and outlines: `proto2/m1_dump.py` and folio's `examples/mermaid_parse_diff.rs`. Every parse result matched on all 23,946 blocks of both samples, except for deliberate changes and differences in the width tables.
+  - Drawings: `proto2/m2_dump.py` and `examples/mermaid_draw_diff.rs`. Before the changes for edges between the same two nodes (section 6.2 H), 83,350 of 85,228 ladder steps were identical. All 1,878 others were in diagrams whose labels Python's `unicodedata` and the `unicode-width` crate measure differently (emoji with VS16, Arabic lam-alef, Indic marks). With the prototype's width table swapped in, differences remained only in 31 diagrams, where the per-character tables disagree.
+  - After those changes, the 14,211 diagrams with none of the affected features still match the prototype exactly. `examples/mermaid_edge_groups.rs` counts the flowcharts with edges that share a drawn line (edges between the same two nodes, two-headed lines, self-loops, lanes) and how their drawings at 78 columns turned out.
+  - The second review round changed more parse results and drawings on purpose ("Implementation status" lists the cases). The comparisons were made before that round and were not run again after it.
 - **Downloaded verification files** are kept with the samples, outside the repository. The East Asian Width lookups in sections 6.3 and 9 use the EastAsianWidth.txt from source 8.
 
 ---

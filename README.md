@@ -6,8 +6,8 @@ for long documents and folders of them: a contents pane, jumping between
 headings, search, links you can follow and come back from, marks, and a
 memory of where you stopped reading.
 
-Phases 1 and 2 of [PLAN.md](PLAN.md) are done. Targets macOS and Linux
-terminals.
+Phases 1 and 2 of [PLAN.md](PLAN.md) are done, and Phase 3 has started with
+Mermaid flowcharts drawn as text. Targets macOS and Linux terminals.
 
 ## Build
 
@@ -28,6 +28,7 @@ folio --color never FILE    # plain text, no escape codes
 folio --width 80 FILE       # narrower reading width (default 100)
 folio --theme light FILE    # force the light theme (default: ask the terminal)
 folio --no-watch FILE       # don't reload when the file changes
+folio --diagrams source FILE  # show Mermaid source instead of drawing it
 ```
 
 Documents that fit on one screen are printed instead of paged. Open files
@@ -46,9 +47,11 @@ reload by themselves when they change on disk.
 | `t` | Contents pane |
 | `Ctrl-P` | Jump to a heading by name |
 | `/`, `n` / `N` | Search, next / previous match |
-| `Tab` / `Shift-Tab` | Next / previous link or code block |
-| `Enter` | Follow the link, or copy the code block |
-| `y` | Copy the link or code block |
+| `Tab` / `Shift-Tab` | Next / previous link, code block or diagram |
+| `Enter` | Follow the link, or copy the code block or diagram source |
+| `y` | Copy the link, code block or diagram source |
+| `s` | Switch the focused diagram between drawing and source |
+| `c` | Copy what the focused diagram shows, as plain text |
 | `H` / `L` | Back / forward |
 | `m a` / `' a` | Set mark `a` / go to it (`A`-`Z` work across files) |
 | `o` | File picker |
@@ -62,6 +65,28 @@ A number before a motion repeats it: `5j`, `3]]`.
 Links to other Markdown files open in folio; web links open in your browser.
 Local files that aren't Markdown are never opened, so a document can't make
 you launch a program by accident.
+
+## Mermaid diagrams
+
+folio draws Mermaid flowcharts itself, as text, so they work over SSH and in
+any terminal. Each drawing sits between two rules: the top one names the
+diagram, the bottom one carries notes such as "drawn top-down to fit".
+
+- A flowchart that is too wide for the screen is redrawn more compactly,
+  then with narrower labels, then top-down. If nothing fits, folio shows an
+  outline instead: one line per edge (`Receive order ─▸ In stock?`), which
+  always fits and keeps every fact.
+- Every drawing is checked before it is shown: lines that seem to join nodes
+  no edge joins, overlapping lines, or text over a line send the diagram to
+  the outline instead of showing something misleading.
+- Flowcharts with subgraphs show an outline that lists each group, until
+  frames are drawn.
+- Sequence diagrams show a numbered transcript for now.
+- Other diagram types, and diagrams folio can't read, show their source with
+  a note saying why (`Not drawn: pie diagrams aren't drawn yet`).
+
+The design and its measurements are in
+[docs/mermaid-plan.md](docs/mermaid-plan.md).
 
 ## Open Markdown files from Finder (macOS)
 

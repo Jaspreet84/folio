@@ -247,7 +247,7 @@ pub fn wrap_code(segs: &[Seg], first_width: usize, rest_width: usize) -> Vec<Vec
     out
 }
 
-/// Pad or truncate `segs` to exactly `w` columns.
+/// Pad `segs` with `fill` to at least `w` columns. Never truncates.
 pub fn fit(mut segs: Vec<Seg>, w: usize, fill: Style) -> Vec<Seg> {
     let cur = segs_width(&segs);
     if cur < w {

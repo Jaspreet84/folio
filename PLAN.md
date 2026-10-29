@@ -61,8 +61,12 @@ Search runs over *flows*: each paragraph, table cell or code line is one flow,
 with its wrapped pieces joined back together. A phrase that wraps across two
 lines is still found.
 
-Slow work (images, diagrams) will run in background jobs in Phase 3. Layout
-reserves a placeholder of the right size and swaps it in when ready.
+Mermaid diagrams are drawn during layout, without background threads. Each
+diagram has a work limit that never depends on the clock, and drawings are
+cached across layouts, so resizing never draws a diagram twice. A budget
+for documents with many diagrams, drawing the rest while the pager is
+idle, comes later (docs/mermaid-plan.md, section 6.6). Images may still
+need background work.
 
 ## Rendering rules
 
@@ -108,9 +112,11 @@ reserves a placeholder of the right size and swaps it in when ready.
 | `t` | Contents pane (open, focus, close) |
 | `Ctrl-P` | Contents pane with a filter for jumping to a heading |
 | `/`, `n`/`N` | Search (smart case, live highlights, "3/17" count) |
-| `Tab` / `Shift-Tab` | Focus the next / previous link or code block |
-| `Enter` | Follow the focused link, or copy the focused code block; with nothing focused, scroll one line |
-| `y` | Copy the focused link or code block |
+| `Tab` / `Shift-Tab` | Focus the next / previous link, code block or diagram |
+| `Enter` | Follow the focused link, or copy the focused code block or diagram source; with nothing focused, scroll one line |
+| `y` | Copy the focused link, code block or diagram source |
+| `s` | Switch the focused diagram between drawing and source |
+| `c` | Copy what the focused diagram shows (drawing, outline or transcript) |
 | `H`, `Backspace`, `Ctrl-O` / `L` | Back / forward |
 | `m` + letter | Set a mark (`a`-`z` in this file, `A`-`Z` across files) |
 | `'` + letter | Go to a mark; `''` goes back |
@@ -166,10 +172,11 @@ arrive. `--no-watch` turns it off.
 
 ### Copying
 
-`Enter` or `y` on a code block copies it. On a local machine folio uses
-`pbcopy`, `wl-copy`, `xclip` or `xsel`, whichever exists. Over SSH, or when
-none exists, it sends OSC 52, which asks the terminal to set the clipboard.
-In tmux, that needs `set -g set-clipboard on`.
+`Enter` or `y` on a code block copies it, and on a diagram they copy its
+Mermaid source. On a local machine folio uses `pbcopy`, `wl-copy`, `xclip`
+or `xsel`, whichever exists. Over SSH, or when none exists, it sends
+OSC 52, which asks the terminal to set the clipboard. In tmux, that needs
+`set -g set-clipboard on`.
 
 The mouse is not captured, so text selection works normally. Wheel scrolling
 works through the terminal's "alternate scroll" mode, which turns wheel events
@@ -227,11 +234,12 @@ xterm colors. `NO_COLOR` is respected.
    copying code blocks.
 3. **Rich content:** images (Kitty, iTerm2, Sixel, half-block fallback),
    Mermaid (native text renderer for flowcharts and sequence diagrams; `mmdc`
-   when installed), Graphviz, math as Unicode, a full-screen table viewer with
-   frozen header and first column, folding sections and `<details>`. Tables
-   and diagrams join the focus model (`Enter` opens them full screen).
-   The Mermaid design, with measurements and the owner's open decisions, is
-   in [docs/mermaid-plan.md](docs/mermaid-plan.md).
+   only when installed and enabled), Graphviz, math as Unicode, a
+   full-screen table viewer with frozen header and first column, folding
+   sections and `<details>`. Tables and diagrams join the focus model
+   (`Enter` opens them full screen). The Mermaid design, with measurements,
+   the owner's decisions and its status, is in
+   [docs/mermaid-plan.md](docs/mermaid-plan.md).
 4. **Polish:** speed on very large files (lazy layout per block), a TOML
    config file with key remapping (moved here from Phase 2), packaging with
    `cargo-dist` (GitHub releases, Homebrew tap, static musl builds), man page
@@ -261,7 +269,8 @@ Measured on Linux (release build):
 Known gaps, to pick up in later phases:
 
 - Loading the full syntax set costs ~150 ms. Phase 4: load a smaller set
-  first, or highlight in the background (Phase 3 adds background jobs).
+  first, or highlight in the background (images in Phase 3 may add
+  background jobs; diagrams don't use them).
 - `<details>` content is always shown; folding comes in Phase 3.
 - Light-theme detection and the colors were not checked on a real Mac.
 
@@ -287,7 +296,10 @@ Done and tested on Linux (WSL Ubuntu, tmux 3.4) and Windows:
 Known gaps:
 
 - Focus is cleared when the layout changes (resize, raw view, reload).
-- Tables and diagrams aren't focus targets yet (Phase 3).
+  Fixed in Phase 3 for resize and reload: focus now stays on the same
+  target, found by its content. The raw view has no targets, so it still
+  clears focus.
+- Tables and diagrams aren't focus targets yet (Phase 3). Diagrams are now.
 - OSC 52 support varies: Terminal.app doesn't support it, and tmux needs
   `set-clipboard on`. On a local Mac, `pbcopy` is used instead.
 - Not checked on a real Mac.
@@ -365,6 +377,64 @@ to fail until someone checks an Intel Mac on macOS 26 by hand.
 Still to check by hand on a Mac: real Finder clicks, macOS 26 on Intel,
 macOS 13 and 14 (no CI runners), a Mac without Xcode tools, the 26.4+
 confirmation prompt, and terminals other than Terminal.app.
+
+## Phase 3 status: Mermaid diagrams (2026-10-28)
+
+Built on the `mermaid` branch, not merged into master yet. This is milestones
+M0 to M2 of the Mermaid plan; the rest of Phase 3 is not started.
+
+- Flowcharts without subgraphs are drawn as text. When the normal drawing
+  is too wide, folio tries narrower forms (compact, shorter label lines,
+  turned top-down) before it shows an outline. Every drawing is checked
+  first: its lines must join exactly the nodes the source links.
+- Flowcharts with subgraphs get an outline of their groups and edges, and
+  sequence diagrams get a numbered transcript. Other diagram types,
+  unsupported syntax and unclosed fences show their source with a reason
+  ("Not drawn: …").
+- On a focused diagram, `s` switches between drawing and source, `c`
+  copies what is shown, and `y` copies the Mermaid source.
+- `src/diagram/` (about 9,300 lines with its unit tests) is a port of the
+  Python prototype. It was compared with the prototype line by line on
+  about 24,000 real diagrams, then went through two rounds of review and
+  fixes. Some fixes change drawings on purpose, so these now differ from
+  the prototype.
+- 231 tests (154 in `src/diagram`). New ones cover the parsers, every
+  ladder step, the checks, random graphs that must never panic, outlines
+  at every width from 1 to 120, and focus kept across a relayout and a
+  reload. A `diagrams` fixture adds snapshots and joins the width check.
+
+Gate, on a held-out sample of 6,496 real Mermaid blocks that played no part
+in building the prototype (release build):
+
+| Check | Needs | Result |
+|---|---|---|
+| Flowcharts that parse | ≥ 95% | 95.4% |
+| Drawn at 78 columns, no subgraphs | ≥ 88% | 94.9% |
+| Drawn at 78 columns, all parsed flowcharts | ≥ 75% | 82.0% |
+| Fitting drawings that fail a check | < 0.5% | 0.1% (11 of 18,504) |
+| Crashes | 0 | 0 |
+| Same output when drawn twice | yes | yes |
+| Time for all steps of one diagram, p99 | ≤ 20 ms | 6.0 ms (max 23.5 ms) |
+| Over the work limit or the size caps | ≤ 0.2% | 0.1% (5 diagrams) |
+
+98.6% of sequence diagrams parse. A diagram that reaches the work limit
+(500,000 steps, roughly 17 to 33 ms) gets its outline. The last gate, a
+readability review of 50 diagrams against other tools, needs a person and
+is still to do.
+
+Known gaps and next steps:
+
+- M3: an ASCII charset, BT and RL diagrams drawn in their own direction
+  (now drawn top-down or left to right, with a note), a budget for
+  documents with many diagrams, and segment splitting in the router.
+- M3b: subgraph frames. M4: drawn sequence diagrams.
+- M5: a full-screen viewer. Until then `Enter` copies the source, and a
+  diagram too wide for the screen shows only its outline.
+- Not done yet: style snapshots, a light-background terminal check and a
+  glyph check on Mac terminals.
+
+Details are in [docs/mermaid-plan.md](docs/mermaid-plan.md), under
+"Implementation status".
 
 ## Testing
 

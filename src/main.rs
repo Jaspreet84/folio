@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, ValueEnum};
 
+use folio::diagram::{self, Diagrams};
 use folio::finder::{self, Terminal};
 use folio::highlight::Highlighter;
 use folio::pager::{Options, Page, Pager, Start};
@@ -52,6 +53,11 @@ struct Args {
     #[arg(long)]
     no_watch: bool,
 
+    /// How to show Mermaid diagrams: "draw" them as text, or show their
+    /// "source" in a code box.
+    #[arg(long, value_enum, value_name = "HOW", default_value_t = DiagramChoice::Draw)]
+    diagrams: DiagramChoice,
+
     /// Add Folio to Finder's "Open With" menu for Markdown files, so they
     /// open in folio in a new terminal window (macOS).
     #[arg(long, help_heading = "Finder (macOS)", conflicts_with = "uninstall_finder")]
@@ -85,6 +91,12 @@ enum When {
     Auto,
     Always,
     Never,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum DiagramChoice {
+    Draw,
+    Source,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -157,6 +169,10 @@ fn run() -> Result<()> {
     let mut theme = Theme::new(dark, depth);
     theme.hyperlinks = color && theme::detect_hyperlinks();
     let mut hl = Highlighter::new();
+    let mut dg = Diagrams::new(match args.diagrams {
+        DiagramChoice::Draw => diagram::Mode::Draw,
+        DiagramChoice::Source => diagram::Mode::Source,
+    });
 
     let page_mode = match args.paging {
         When::Always => {
@@ -185,7 +201,7 @@ fn run() -> Result<()> {
     let page = match (folder, args.file.as_deref()) {
         (Some(dir), _) if page_mode => {
             let dir = dir.canonicalize().with_context(|| format!("can't open {}", dir.display()))?;
-            return run_pager(Start::Picker(dir), theme, hl, options);
+            return run_pager(Start::Picker(dir), theme, hl, dg, options);
         }
         (Some(dir), _) => {
             let readme = find_readme(&dir)?;
@@ -205,14 +221,14 @@ fn run() -> Result<()> {
     if page_mode {
         // Like `less -F`: a document that fits on one screen is just printed.
         if args.paging == When::Auto {
-            let rendered = layout::layout(page.document(), width, &theme, &mut hl);
+            let rendered = layout::layout(page.document(), width, &theme, &mut hl, &mut dg);
             if rendered.lines.len() < term_h {
                 return print(&rendered, color, &theme, page.dir());
             }
         }
-        run_pager(Start::Page(page), theme, hl, options)
+        run_pager(Start::Page(page), theme, hl, dg, options)
     } else {
-        let rendered = layout::layout(page.document(), width, &theme, &mut hl);
+        let rendered = layout::layout(page.document(), width, &theme, &mut hl, &mut dg);
         print(&rendered, color, &theme, page.dir())
     }
 }
@@ -252,12 +268,12 @@ fn install_finder(args: &Args) -> Result<()> {
     Ok(())
 }
 
-fn run_pager(start: Start, theme: Theme, hl: Highlighter, options: Options) -> Result<()> {
+fn run_pager(start: Start, theme: Theme, hl: Highlighter, dg: Diagrams, options: Options) -> Result<()> {
     let mut terminal = ratatui::try_init().context("can't set up the terminal")?;
     // Alternate scroll mode: the mouse wheel sends arrow keys, so wheel
     // scrolling works without capturing the mouse (selection still works).
     let _ = io::stdout().write_all(b"\x1b[?1007h").and_then(|()| io::stdout().flush());
-    let result = Pager::new(start, theme, hl, options).run(&mut terminal);
+    let result = Pager::new(start, theme, hl, dg, options).run(&mut terminal);
     let _ = io::stdout().write_all(b"\x1b[?1007l").and_then(|()| io::stdout().flush());
     ratatui::restore();
     result.context("terminal error")

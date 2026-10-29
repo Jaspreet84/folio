@@ -1,6 +1,7 @@
 //! folio: a Markdown reader for the terminal.
 
 pub mod ansi;
+pub mod diagram;
 pub mod doc;
 pub mod finder;
 pub mod highlight;

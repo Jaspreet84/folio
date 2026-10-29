@@ -22,6 +22,11 @@ pub enum BlockKind {
     Heading { level: u8, inlines: Vec<Inline>, anchor: String },
     Paragraph(Vec<Inline>),
     Code { lang: String, code: String },
+    /// A fenced Mermaid block. `lang` is the info string's first word, as
+    /// for `Code`; `closed` is false when the document ends before the
+    /// closing fence. A fence that ends with its quote or list item, with
+    /// more of the document after it, is complete and counts as closed.
+    Diagram { lang: String, source: String, closed: bool },
     Quote(Vec<Block>),
     Alert { kind: AlertKind, title: Option<String>, blocks: Vec<Block> },
     List { ordered: bool, start: usize, tight: bool, items: Vec<Item> },
@@ -125,7 +130,8 @@ pub fn parse(src: &str) -> Document {
     ext.alerts = true;
     ext.math_dollars = true;
     let root = parse_document(&arena, src, &options);
-    let mut conv = Converter { anchors: Anchorizer::new(), footnotes: HashMap::new() };
+    let last_line = src.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()).last().map_or(0, |(i, _)| i + 1);
+    let mut conv = Converter { anchors: Anchorizer::new(), footnotes: HashMap::new(), last_line };
     Document { blocks: conv.blocks(root) }
 }
 
@@ -133,6 +139,8 @@ struct Converter {
     anchors: Anchorizer,
     /// Footnote name -> number, assigned in order of first reference.
     footnotes: HashMap<String, usize>,
+    /// The last source line with any text on it (1-based; 0 if none).
+    last_line: usize,
 }
 
 impl Converter {
@@ -186,7 +194,20 @@ impl Converter {
             NodeValue::CodeBlock(cb) => {
                 let lang = cb.info.split_whitespace().next().unwrap_or("").to_string();
                 let code = clean(cb.literal.strip_suffix('\n').unwrap_or(&cb.literal));
-                BlockKind::Code { lang, code }
+                if cb.fenced && is_mermaid(&lang) {
+                    // comrak calls a fence closed only when it meets its
+                    // closing fence. One that ends with its quote or list
+                    // item is complete too: text follows its last line. Only
+                    // a fence cut off by the end of the document is not.
+                    // (comrak's end position is unreliable for such fences,
+                    // so the last line is counted from the opening one.)
+                    let last = line + cb.literal.matches('\n').count();
+                    let closed = cb.closed || self.last_line > last;
+                    let source = if cb.closed { code } else { trim_blank_end(&code) };
+                    BlockKind::Diagram { lang, source, closed }
+                } else {
+                    BlockKind::Code { lang, code }
+                }
             }
             NodeValue::BlockQuote | NodeValue::MultilineBlockQuote(_) => {
                 BlockKind::Quote(self.blocks(node))
@@ -342,6 +363,23 @@ pub fn clean(s: &str) -> String {
         .collect()
 }
 
+/// Whether a fence's first info word names Mermaid: `mermaid`, or MyST's
+/// `{mermaid}`, in any case. Other braces (`mermaid}`, `{{mermaid}}`) are
+/// not Mermaid, as on GitHub.
+fn is_mermaid(lang: &str) -> bool {
+    let word = lang.strip_prefix('{').and_then(|s| s.strip_suffix('}')).unwrap_or(lang);
+    word.eq_ignore_ascii_case("mermaid")
+}
+
+/// `s` without the blank lines at its end. A fence that ends with its list
+/// item keeps the blank line that ended the item; it isn't part of the
+/// diagram.
+fn trim_blank_end(s: &str) -> String {
+    let lines: Vec<&str> = s.lines().collect();
+    let keep = lines.iter().rposition(|l| !l.trim().is_empty()).map_or(0, |i| i + 1);
+    lines[..keep].join("\n")
+}
+
 /// Like [`clean`], for text shown on one line (file names, paths): every
 /// control character, newlines and tabs included, becomes U+FFFD.
 pub fn clean_line(s: &str) -> String {
@@ -444,5 +482,57 @@ mod tests {
             })
             .collect();
         assert_eq!(numbers, vec![1, 2]);
+    }
+
+    #[test]
+    fn mermaid_fences_need_mermaid_or_one_pair_of_braces() {
+        for yes in ["mermaid", "MERMAID", "Mermaid", "{mermaid}", "{Mermaid}"] {
+            assert!(is_mermaid(yes), "{yes}");
+        }
+        for no in ["mermaid}", "{mermaid", "{{mermaid}}", "{{{mermaid", "mmd", "", "{}", "mermaidjs"] {
+            assert!(!is_mermaid(no), "{no}");
+        }
+    }
+
+    /// The first diagram found anywhere in `src`, as (source, closed).
+    fn diagram(src: &str) -> (String, bool) {
+        fn find(blocks: &[Block]) -> Option<(String, bool)> {
+            blocks.iter().find_map(|b| match &b.kind {
+                BlockKind::Diagram { source, closed, .. } => Some((source.clone(), *closed)),
+                BlockKind::Quote(inner) => find(inner),
+                BlockKind::List { items, .. } => items.iter().find_map(|i| find(&i.blocks)),
+                _ => None,
+            })
+        }
+        find(&parse(src).blocks).expect("a diagram")
+    }
+
+    #[test]
+    fn a_fence_ended_by_its_container_is_closed() {
+        let quote = "> ```mermaid\n> flowchart TD\n>   C --> D\n\nAfter quote.\n";
+        assert_eq!(diagram(quote), ("flowchart TD\n  C --> D".into(), true));
+        let list = "- item\n\n  ```mermaid\n  flowchart TD\n    A --> B\n\nParagraph after the list.\n";
+        assert_eq!(diagram(list), ("flowchart TD\n  A --> B".into(), true));
+        let next_item = "- ```mermaid\n  flowchart TD\n  A-->B\n- next\n";
+        assert_eq!(diagram(next_item), ("flowchart TD\nA-->B".into(), true));
+        // Text that makes no block (a link definition) still follows.
+        let reference = "> ```mermaid\n> flowchart TD\n>   C --> D\n\n[r]: https://x.example\n";
+        assert!(diagram(reference).1);
+        let front = "---\ntitle: x\n---\n\n> ```mermaid\n> flowchart TD\n>   C --> D\n\nAfter.\n";
+        assert!(diagram(front).1);
+    }
+
+    #[test]
+    fn a_fence_cut_off_by_the_end_of_the_document_is_not_closed() {
+        let top = "```mermaid\nflowchart TD\n  A-->B\n\n\n";
+        assert_eq!(diagram(top), ("flowchart TD\n  A-->B".into(), false));
+        assert!(!diagram("> ```mermaid\n> flowchart TD\n>   C --> D\n>\n\n").1);
+        assert!(!diagram("- item\n\n  ```mermaid\n  flowchart TD\n    A --> B\n").1);
+        assert!(!diagram("- item\n\n  ```mermaid\n  flowchart TD\n    A --> B\n\n").1);
+        // Footnotes are moved to the end, but come before the fence here.
+        assert!(!diagram("Text[^1]\n\n[^1]: Note\n\n```mermaid\nflowchart TD\n  A-->\n").1);
+        let front = "---\ntitle: x\n---\n\n```mermaid\nflowchart TD\n  A-->B\n";
+        assert!(!diagram(front).1);
+        assert!(diagram("```mermaid\nflowchart TD\n  A-->B\n```\n").1);
     }
 }

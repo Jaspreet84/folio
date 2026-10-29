@@ -46,6 +46,14 @@ pub struct Theme {
     pub focus: Style,
     /// The border of a focused code block.
     pub focus_border: Style,
+    /// Box borders and frames in Mermaid diagrams.
+    pub diagram_line: Style,
+    /// Edges in Mermaid diagrams.
+    pub diagram_edge: Style,
+    /// Edge labels in Mermaid diagrams.
+    pub diagram_label: Style,
+    /// The note under a diagram that was not drawn.
+    pub diagram_note: Style,
 }
 
 struct Palette {
@@ -63,6 +71,9 @@ struct Palette {
     current_bg: u32,
     match_fg: u32,
     selected_bg: u32,
+    /// Diagram lines carry meaning, so they need more contrast than `border`.
+    diagram_line: u32,
+    diagram_edge: u32,
 }
 
 const DARK: Palette = Palette {
@@ -80,6 +91,8 @@ const DARK: Palette = Palette {
     current_bg: 0xE5C07B,
     match_fg: 0x1E2127,
     selected_bg: 0x3E4451,
+    diagram_line: 0x9DA5B4,
+    diagram_edge: 0x7F848E,
 };
 
 const LIGHT: Palette = Palette {
@@ -97,6 +110,8 @@ const LIGHT: Palette = Palette {
     current_bg: 0xF5A524,
     match_fg: 0x1F2328,
     selected_bg: 0xDDF4FF,
+    diagram_line: 0x57606A,
+    diagram_edge: 0x6E7781,
 };
 
 impl Theme {
@@ -170,6 +185,10 @@ impl Theme {
                 Style::new().bg(color(p.selected_bg, depth)).add_modifier(bold)
             },
             focus_border: if colorless { Style::new().add_modifier(bold) } else { fg(p.current_bg).add_modifier(bold) },
+            diagram_line: fg(p.diagram_line),
+            diagram_edge: fg(p.diagram_edge),
+            diagram_label: fg(p.muted).add_modifier(Modifier::ITALIC),
+            diagram_note: fg(p.muted).add_modifier(Modifier::ITALIC),
         }
     }
 

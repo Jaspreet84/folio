@@ -5,8 +5,11 @@
 //! lines, layout records the headings (for the contents pane) and the
 //! "flows" of text (for search).
 
+use std::collections::HashMap;
+
 use ratatui::style::{Modifier, Style};
 
+use crate::diagram::{self, Charset, Diagrams, Drawing, Kind, Mode, Outcome, Request, Role};
 use crate::doc::{Align, Block, BlockKind, Definition, Document, Inline, Item, plain_text};
 use crate::highlight::Highlighter;
 use crate::table::{MIN_CAP, column_widths};
@@ -58,6 +61,8 @@ pub enum TargetKind {
     /// A link; the number indexes [`Rendered::links`].
     Link(u32),
     Code { lang: String, code: String },
+    /// A Mermaid diagram; the number indexes [`Rendered::diagrams`].
+    Diagram(u32),
 }
 
 /// A focus target and where it is drawn, as (line, column, width) runs.
@@ -77,6 +82,39 @@ impl Target {
     }
 }
 
+/// A Mermaid diagram as laid out.
+#[derive(Clone, Debug)]
+pub struct DiagramRef {
+    pub source: String,
+    /// (hash of the source, occurrence among the document's diagrams with
+    /// that hash): the key of the reader's switch to source.
+    pub key: (u64, u32),
+    /// "flowchart" or "sequence", when the diagram could be read.
+    pub kind: Option<&'static str>,
+    pub shown: Shown,
+    /// What is drawn (drawing or outline) as plain text, for copying.
+    pub drawing: Option<String>,
+    /// A note for the footer: why it wasn't drawn, or how it was drawn.
+    pub detail: Option<String>,
+}
+
+impl DiagramRef {
+    /// What a [`Shown::Outline`] is called for this diagram: a sequence
+    /// diagram's is a transcript, as its top rule says.
+    pub fn outline_name(&self) -> &'static str {
+        if self.kind == Some(Kind::Sequence.name()) { "transcript" } else { "outline" }
+    }
+}
+
+/// How a diagram is shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shown {
+    Drawing,
+    /// An outline or transcript, because no drawing fits.
+    Outline,
+    Source,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Rendered {
     pub width: usize,
@@ -89,6 +127,8 @@ pub struct Rendered {
     pub targets: Vec<Target>,
     /// Named places other than headings (footnotes), as (name, line).
     pub anchors: Vec<(String, usize)>,
+    /// Mermaid diagrams. [`TargetKind::Diagram`] indexes this.
+    pub diagrams: Vec<DiagramRef>,
 }
 
 impl Rendered {
@@ -197,13 +237,16 @@ impl Rendered {
     }
 }
 
-/// Lay out a document at `width` columns.
-pub fn layout(doc: &Document, width: usize, theme: &Theme, hl: &mut Highlighter) -> Rendered {
+/// Lay out a document at `width` columns. `dg` caches diagrams across
+/// layouts and holds the diagram settings.
+pub fn layout(doc: &Document, width: usize, theme: &Theme, hl: &mut Highlighter, dg: &mut Diagrams) -> Rendered {
     let width = width.max(1);
-    let mut l = Layouter { theme, hl, list_depth: 0, links: Vec::new() };
+    dg.begin_layout();
+    let mut l = Layouter { theme, hl, dg, list_depth: 0, links: Vec::new(), diagrams: Vec::new(), seen: HashMap::new() };
     let mut out = l.blocks(&doc.blocks, width, false);
     out.width = width;
     out.links = l.links;
+    out.diagrams = l.diagrams;
     out.collect_links();
     out
 }
@@ -283,14 +326,18 @@ pub fn layout_raw(
     out
 }
 
-struct Layouter<'t, 'h> {
+struct Layouter<'t, 'h, 'd> {
     theme: &'t Theme,
     hl: &'h mut Highlighter,
+    dg: &'d mut Diagrams,
     list_depth: usize,
     links: Vec<String>,
+    diagrams: Vec<DiagramRef>,
+    /// Diagrams seen so far, by source hash, to number repeats.
+    seen: HashMap<u64, u32>,
 }
 
-impl Layouter<'_, '_> {
+impl Layouter<'_, '_, '_> {
     fn blocks(&mut self, blocks: &[Block], width: usize, tight: bool) -> Rendered {
         let mut out = Rendered::default();
         let mut seen_footnote = false;
@@ -331,6 +378,7 @@ impl Layouter<'_, '_> {
                 paragraph(&toks, width, src)
             }
             BlockKind::Code { lang, code } => self.code(lang, lang, code, width, src),
+            BlockKind::Diagram { lang, source, closed } => self.diagram(lang, source, *closed, width, src),
             BlockKind::FrontMatter(text) => self.code("yaml", "front matter", text, width, src),
             BlockKind::Quote(blocks) => {
                 let bar = [Seg::new("│ ", t.quote_bar)];
@@ -505,6 +553,147 @@ impl Layouter<'_, '_> {
         }
         out.targets.push(Target { kind: TargetKind::Code { lang: lang.to_string(), code: code.to_string() }, spans });
         out
+    }
+
+    fn diagram(&mut self, lang: &str, source: &str, closed: bool, width: usize, src: usize) -> Rendered {
+        if self.dg.mode == Mode::Source {
+            return self.code(lang, lang, source, width, src);
+        }
+        let hash = diagram::source_hash(source);
+        let seen = self.seen.entry(hash).or_insert(0);
+        let key = (hash, *seen);
+        *seen += 1;
+        let id = self.diagrams.len() as u32;
+        let mut info = DiagramRef { source: source.to_string(), key, kind: None, shown: Shown::Source, drawing: None, detail: None };
+        let out = if !closed {
+            let why = "the code fence isn't closed";
+            info.detail = Some(why.into());
+            self.diagram_source(id, lang, source, Some(why), width, src)
+        } else if self.dg.as_source.contains(&key) {
+            self.diagram_source(id, lang, source, None, width, src)
+        } else {
+            match diagram::render(source, &Request { width, charset: Charset::Unicode }, self.dg) {
+                Outcome::Drawn(d) | Outcome::Outline(d) => {
+                    info.kind = Some(d.kind.name());
+                    info.shown = if d.step.is_some() { Shown::Drawing } else { Shown::Outline };
+                    info.drawing = Some(d.text());
+                    info.detail = (!d.notes.is_empty()).then(|| d.notes.join("; "));
+                    self.framed(id, &d, width, src)
+                }
+                Outcome::Source(why) => {
+                    let why = crate::doc::clean_line(&why);
+                    let out = self.diagram_source(id, lang, source, Some(&why), width, src);
+                    info.detail = Some(why);
+                    out
+                }
+            }
+        };
+        self.diagrams.push(info);
+        out
+    }
+
+    /// A diagram's source in a code box, with the reason it wasn't drawn.
+    fn diagram_source(&mut self, id: u32, lang: &str, source: &str, why: Option<&str>, width: usize, src: usize) -> Rendered {
+        let mut out = self.code(lang, "mermaid", source, width, src);
+        for t in &mut out.targets {
+            t.kind = TargetKind::Diagram(id);
+        }
+        if let Some(why) = why {
+            let toks = [Tok::Text(Seg::new(format!("Not drawn: {why}"), self.theme.diagram_note))];
+            out.nest(paragraph(&toks, width, src), &[], &[]);
+        }
+        out
+    }
+
+    /// A drawing or outline between two rules: the top one names the
+    /// diagram, the bottom one carries its notes. Drawings are centered.
+    fn framed(&mut self, id: u32, d: &Drawing, width: usize, src: usize) -> Rendered {
+        let t = self.theme;
+        let mut out = Rendered::default();
+        let kind = d.kind.name();
+        let what = match (d.step, d.kind) {
+            (Some(_), _) => kind.to_string(),
+            (None, Kind::Sequence) => format!("{kind} (transcript)"),
+            (None, Kind::Flowchart) => format!("{kind} (outline)"),
+        };
+        // Each label with, when it shows the title, the title's column in
+        // the label and the title as shown.
+        let mut labels: Vec<(String, Option<(usize, String)>)> = Vec::new();
+        if let Some(title) = d.title.as_deref().filter(|s| !s.is_empty()) {
+            // The title matters more than "(outline)" or the kind. Show it in
+            // full, or cut to at least 10 columns, after the longest prefix
+            // that leaves room; failing that, cut it shorter.
+            let mut prefixes = vec![format!("mermaid · {what} · ")];
+            if what != kind {
+                prefixes.push(format!("mermaid · {kind} · "));
+            }
+            prefixes.push("mermaid · ".to_string());
+            for least in [width_of(title).min(10), 2] {
+                for prefix in &prefixes {
+                    let room = width.saturating_sub(6 + width_of(prefix));
+                    if room >= least {
+                        let shown = truncate(title, room);
+                        labels.push((format!("{prefix}{shown}"), Some((width_of(prefix), shown))));
+                    }
+                }
+            }
+        }
+        labels.extend([format!("mermaid · {what}"), format!("mermaid · {kind}"), "mermaid".to_string()].map(|l| (l, None)));
+        let (label, title) = labels.into_iter().find(|(l, _)| width_of(l) + 6 <= width).unzip();
+        // The title is text the reader sees, so search finds it, as it is
+        // shown (a cut title matches up to the cut). `rule` puts the label
+        // at column 3.
+        let mut title_words = 0;
+        if let Some((col, shown)) = title.flatten() {
+            title_words = shown.split_whitespace().count() as u32;
+            out.flows.push(Flow { pieces: vec![Piece { line: 0, col: 3 + col, text: shown }], joiner: " " });
+        }
+        out.push(rule(label.as_deref(), false, width, t.diagram_line, t.code_label), src, title_words);
+
+        debug_assert!(d.width <= width, "a {} columns wide drawing at width {width}", d.width);
+        let pad = if d.step.is_some() { width.saturating_sub(d.width) / 2 } else { 0 };
+        let first = out.lines.len();
+        let mut words = vec![0u32; d.rows.len()];
+        for label in &d.labels {
+            let mut flow = Flow { pieces: Vec::new(), joiner: " " };
+            for (row, col, text) in &label.pieces {
+                if let Some(w) = words.get_mut(*row) {
+                    *w += text.split_whitespace().count() as u32;
+                }
+                flow.pieces.push(Piece { line: first + row, col: pad + col, text: text.clone() });
+            }
+            out.flows.push(flow);
+        }
+        for (row, runs) in d.rows.iter().enumerate() {
+            let mut segs = Vec::new();
+            if pad > 0 && !runs.is_empty() {
+                segs.push(Seg::plain(" ".repeat(pad)));
+            }
+            for (role, text) in runs {
+                segs.push(Seg::new(text.clone(), self.role_style(*role)));
+            }
+            debug_assert!(segs_width(&segs) <= width, "diagram row wider than {width}: {:?}", segs_text(&segs));
+            out.push(segs, src, words[row]);
+        }
+
+        let note = d.notes.join("; ");
+        let note = (!note.is_empty()).then(|| truncate(&note, width.saturating_sub(6))).filter(|n| width_of(n) >= 4);
+        out.push(rule(note.as_deref(), true, width, t.diagram_line, t.diagram_note), src, 0);
+        let last = out.lines.len() - 1;
+        out.targets.push(Target { kind: TargetKind::Diagram(id), spans: vec![(0, 0, width), (last, 0, width)] });
+        out
+    }
+
+    fn role_style(&self, role: Role) -> Style {
+        let t = self.theme;
+        match role {
+            Role::Border | Role::Frame => t.diagram_line,
+            Role::Edge => t.diagram_edge,
+            Role::EdgeLabel => t.diagram_label,
+            Role::NodeText | Role::Arrow => Style::new(),
+            Role::FrameTitle => t.code_label,
+            Role::Note => t.diagram_note,
+        }
     }
 
     fn list(&mut self, ordered: bool, start: usize, tight: bool, items: &[Item], width: usize, src: usize) -> Rendered {
@@ -784,6 +973,22 @@ fn paragraph(toks: &[Tok], width: usize, src: usize) -> Rendered {
     }
     out.flows.push(flow);
     out
+}
+
+/// A rule across `width` columns with a label: `── label ─────`, or with
+/// `right`, `───── label ──`. The caller makes sure the label fits in
+/// `width - 6`; without one the rule is plain.
+fn rule(label: Option<&str>, right: bool, width: usize, line: Style, text: Style) -> Vec<Seg> {
+    let Some(label) = label.filter(|l| width_of(l) + 6 <= width) else {
+        return vec![Seg::new("─".repeat(width), line)];
+    };
+    let rest = width - width_of(label) - 4;
+    let (before, after) = if right { (rest, 2) } else { (2, rest) };
+    vec![
+        Seg::new("─".repeat(before), line),
+        Seg::new(format!(" {label} "), text),
+        Seg::new("─".repeat(after), line),
+    ]
 }
 
 fn inner_width(width: usize, prefix: usize) -> Option<usize> {
